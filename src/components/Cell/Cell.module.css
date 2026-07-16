@@ -1,0 +1,114 @@
+.cell {
+  width: 60px;
+  height: 60px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.08);
+  transition: filter 0.15s;
+  cursor: default;
+}
+
+.cell:hover {
+  filter: brightness(1.1);
+  z-index: 2;
+}
+
+.cell.corner {
+  border-color: rgba(255,255,255,0.18);
+}
+
+/* 所有方向文字保持正向，不旋转 */
+
+.ownerBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 2;
+}
+
+.leagueBar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 100%;
+}
+
+.cellId {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  font-size: 7px;
+  color: rgba(255,255,255,0.35);
+  line-height: 1;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0px;
+  text-align: center;
+  padding: 2px;
+}
+
+.icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.name {
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #eee;
+  max-width: 58px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cornerName {
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.price {
+  font-size: 8px;
+  color: #f0c060;
+  font-weight: 600;
+}
+
+.stars {
+  font-size: 9px;
+  color: #ffd700;
+  letter-spacing: -1px;
+  text-shadow: 0 0 4px rgba(255,215,0,0.5);
+  line-height: 1;
+}
+
+@media (max-width: 900px) {
+  .cell {
+    width: 42px;
+    height: 42px;
+  }
+  .name {
+    font-size: 7px;
+    max-width: 40px;
+  }
+  .icon {
+    font-size: 12px;
+  }
+  .price {
+    font-size: 6px;
+  }
+}

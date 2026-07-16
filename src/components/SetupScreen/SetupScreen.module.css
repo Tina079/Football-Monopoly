@@ -1,0 +1,113 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  z-index: 100;
+}
+
+.card {
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 520px;
+  width: 95%;
+  text-align: center;
+}
+
+.title {
+  font-size: 36px;
+  color: #f0c060;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #888;
+  margin-bottom: 32px;
+}
+
+.section {
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  color: #aaa;
+  margin-bottom: 10px;
+}
+
+.numRow {
+  display: flex;
+  gap: 10px;
+}
+
+.numBtn {
+  flex: 1;
+  padding: 10px;
+  background: rgba(255,255,255,0.08);
+  color: #ccc;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  font-size: 15px;
+}
+
+.numBtn.active {
+  border-color: #f0c060;
+  color: #f0c060;
+  background: rgba(240,192,96,0.1);
+}
+
+.colorRow {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.playerLabel {
+  min-width: 60px;
+  font-size: 14px;
+  color: #ccc;
+}
+
+.colorOptions {
+  display: flex;
+  gap: 8px;
+}
+
+.colorBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  padding: 0;
+}
+
+.colorBtn.selected {
+  border-color: #fff;
+  box-shadow: 0 0 12px rgba(255,255,255,0.3);
+}
+
+.colorBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.startBtn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #f0c060, #e94560);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: 10px;
+  margin-top: 8px;
+}

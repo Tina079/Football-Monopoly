@@ -1,0 +1,62 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.panel {
+  background: #1a1a2e;
+  border: 2px solid #f0c060;
+  border-radius: 16px;
+  padding: 24px;
+  width: 90vw;
+  max-width: 1000px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.header { text-align: center; margin-bottom: 16px; }
+.title { font-size: 20px; color: #f0c060; margin: 0 0 8px; }
+.forfeitRow { display: flex; gap: 16px; justify-content: center; margin-bottom: 8px; }
+.forfeitBtn {
+  padding: 3px 12px; font-size: 11px; background: rgba(255,80,80,0.12);
+  color: #f66; border: 1px solid rgba(255,80,80,0.3); border-radius: 6px;
+  cursor: pointer; transition: all .15s;
+}
+.forfeitBtn:hover { background: rgba(255,80,80,0.25); border-color: #f44; }
+.scoreboard { font-size: 28px; font-weight: 700; display: flex; justify-content: center; gap: 12px; }
+.vs { color: #888; }
+.arena { display: flex; gap: 16px; }
+.side { flex: 1; background: rgba(255,255,255,0.03); border-radius: 12px; padding: 12px; }
+.sideName { font-size: 15px; margin: 0 0 8px; text-align: center; }
+.squad { display: flex; flex-direction: column; gap: 6px; }
+.playerBtn {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; color: #ccc; font-size: 13px; cursor: pointer; transition: all .15s;
+}
+.playerBtn:hover { background: rgba(240,192,96,0.1); border-color: #f0c060; }
+.playerBtn.selected { background: rgba(240,192,96,0.2); border-color: #f0c060; }
+.playerName { font-weight: 600; }
+.playerAttrs { font-size: 11px; color: #888; }
+.revealCard {
+  display: flex; justify-content: space-between; padding: 10px 14px;
+  background: rgba(255,255,255,0.08); border-radius: 8px; font-size: 14px;
+}
+.revealCard.winner { background: rgba(240,192,96,0.15); border: 1px solid #f0c060; }
+.revealName { font-weight: 600; }
+.revealVal { font-size: 20px; font-weight: 700; color: #f0c060; }
+.center { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 120px; }
+.diceResult { text-align: center; }
+.diceIcon { font-size: 48px; display: block; }
+.attrLabel { font-size: 14px; color: #f0c060; display: block; margin: 4px 0; }
+.winnerLabel { font-size: 16px; font-weight: 700; }
+.actions { text-align: center; margin: 16px 0; }
+.confirmBtn {
+  padding: 10px 32px; background: linear-gradient(135deg, #f0c060, #e94560);
+  color: #fff; font-size: 15px; font-weight: 700; border-radius: 10px;
+}
+.roundLog { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+.roundItem { font-size: 11px; color: #666; background: rgba(255,255,255,0.03); padding: 3px 8px; border-radius: 4px; }

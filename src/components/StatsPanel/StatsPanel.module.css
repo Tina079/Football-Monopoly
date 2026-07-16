@@ -1,0 +1,282 @@
+.panel {
+  width: 330px;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  max-height: 100vh;
+  padding: 16px 12px;
+}
+
+.section {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.heading {
+  font-size: 14px;
+  color: #aaa;
+  margin-bottom: 10px;
+}
+
+.playerCard {
+  padding: 10px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 2px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.playerCard.active {
+  border-color: rgba(240,192,96,0.4);
+  background: rgba(240,192,96,0.06);
+}
+
+.playerCard.bankrupt {
+  opacity: 0.4;
+}
+
+.playerHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.playerName {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.badge {
+  font-size: 10px;
+  background: rgba(240,192,96,0.2);
+  color: #f0c060;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.badgeBankrupt {
+  font-size: 10px;
+  background: rgba(233,69,96,0.2);
+  color: #e94560;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.badgeJail {
+  font-size: 10px;
+  background: rgba(255,255,255,0.1);
+  color: #ccc;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 12px;
+  margin-top: 6px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: #888;
+}
+
+.statValue {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ddd;
+}
+
+.statValue.debt {
+  color: #e94560;
+}
+
+.statValue.positive {
+  color: #2ecc71;
+}
+
+.statValue.negative {
+  color: #e94560;
+}
+
+/* 净值大字 */
+.netWorthBig {
+  font-size: 22px;
+  font-weight: 700;
+  text-align: center;
+  margin-top: 4px;
+}
+
+.netWorthBig.positive {
+  color: #2ecc71;
+}
+
+.netWorthBig.negative {
+  color: #e94560;
+}
+
+.netWorthLabel {
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+/* 双进度条 */
+.barRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.barIcon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.barLabel {
+  font-size: 9px;
+  color: #888;
+  width: 22px;
+  flex-shrink: 0;
+}
+
+.barTrack {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.barFillWin {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+
+.barFillFail {
+  height: 100%;
+  background: linear-gradient(90deg, #e94560, #ff6b6b);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+
+.barNum {
+  font-size: 9px;
+  color: #999;
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.propertyList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.propertyTag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid;
+  color: #bbb;
+  background: rgba(255,255,255,0.04);
+}
+
+.noProperty {
+  font-size: 10px;
+  color: #555;
+}
+
+/* Log */
+.logList {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.logItem {
+  font-size: 11px;
+  color: #aaa;
+  padding: 4px 6px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.logEmpty {
+  font-size: 11px;
+  color: #555;
+  text-align: center;
+}
+
+/* 球场等级参考表 */
+.refTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.refTable th {
+  color: #888;
+  font-weight: 500;
+  text-align: left;
+  padding: 3px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.refTable td {
+  color: #bbb;
+  padding: 3px 4px;
+}
+
+.refTable tbody tr:nth-child(5) td {
+  color: #f0c060;
+  font-weight: 600;
+}
+
+.refNote {
+  font-size: 9px;
+  color: #666;
+  margin-top: 6px;
+  text-align: center;
+}
+
+.winConds {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 10px;
+}
+.badgeAI { font-size: 13px; margin-left: 4px; }
+.condDone { color: #4caf50; }
+.condTodo { color: #555; }

@@ -1,0 +1,173 @@
+.container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(255,255,255,0.04);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  min-height: 48px;
+  flex-wrap: wrap;
+}
+
+.currentPlayer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.diceDisplay {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.diceFace {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.diceNum {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f0c060;
+}
+
+.actionBtn {
+  margin-left: auto;
+  padding: 7px 14px;
+  background: linear-gradient(135deg, #f0c060, #e8963a);
+  color: #1a1a2e;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.actionBtn:disabled {
+  opacity: 0.8;
+  filter: none;
+}
+
+/* 多选操作区 */
+.actionGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+.actionPrompt {
+  font-size: 12px;
+  color: #aaa;
+  white-space: normal;
+  max-width: 400px;
+  flex-shrink: 1;
+  line-height: 1.4;
+}
+
+.actionBtns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.primaryBtn {
+  padding: 7px 14px;
+  background: linear-gradient(135deg, #f0c060, #e8963a);
+  color: #1a1a2e;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+}
+
+.secondaryBtn {
+  padding: 7px 14px;
+  background: rgba(255,255,255,0.08);
+  color: #999;
+  font-size: 12px;
+  border-radius: 6px;
+}
+.primaryBtn:disabled, .secondaryBtn:disabled {
+  opacity: 0.8;
+  filter: none;
+}
+
+/* 挑战 */
+.challengeBox {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.challengeRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.challengeLabel {
+  font-size: 13px;
+  color: #f0c060;
+  font-weight: 600;
+}
+
+.vsLabel {
+  font-size: 12px;
+  color: #888;
+}
+
+.diceRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rollBox {
+  font-size: 12px;
+  color: #ccc;
+  background: rgba(255,255,255,0.05);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.rollBox strong {
+  font-size: 18px;
+  color: #fff;
+}
+
+.vsText {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e94560;
+}
+
+.resultMsg {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f0c060;
+  margin: 0 4px;
+}
+.botThinking {
+  font-size: 12px; color: #f0c060; padding: 4px 12px;
+  border: 1px solid; border-radius: 6px;
+  animation: blink 0.8s ease-in-out infinite alternate;
+}
+@keyframes blink { from { opacity: 0.5; } to { opacity: 1; } }
