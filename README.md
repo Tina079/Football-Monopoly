@@ -26,7 +26,7 @@ A football-themed Monopoly board game with player recruitment, team battles, lea
 ## 🚀 Quick Start / 快速开始
 
 ```bash
-cd interest/Monopoly
+cd Football-Monopoly
 npm install
 npm run dev
 ```
