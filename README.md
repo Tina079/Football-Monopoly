@@ -5,6 +5,8 @@
 ---
 
 ## 🚀 快速开始
+联网：https://football-monopoly.netlify.app
+本地：
 
 ```bash
 cd Football-Monopoly
