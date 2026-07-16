@@ -26,7 +26,7 @@ A football-themed Monopoly board game with player recruitment, team battles, lea
 ## 🚀 Quick Start / 快速开始
 
 ```bash
-cd interest/Monopoly
+cd Football-Monopoly
 npm install
 npm run dev
 ```
@@ -113,12 +113,6 @@ Roll dice (1d6) → move → land on tile → take action → end turn
 ### Player Growth
 - Match participation: compared attribute +1
 - Training camp: all 6 attributes +1 per training point
-
----
-
-## 📝 License
-
-MIT
 
 ---
 
