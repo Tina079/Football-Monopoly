@@ -1,29 +1,10 @@
-# ⚽ 足球大富翁 / Football Monopoly
+# ⚽ 足球大富翁
 
-A football-themed Monopoly board game with player recruitment, team battles, league rankings, and AI opponents. Built with React + TypeScript + Vite.
-
-一款融合球员收集、六维对战、联赛积分榜和AI机器人的足球主题大富翁棋盘游戏。
+把大富翁和足球经理揉在一起的本地多人棋盘游戏。买俱乐部、签球员、升级球场，用六维属性对战决定胜负。从国内联赛打到欧冠，先凑够 100kw 资金 + 3 座五级球场 + 一座欧冠奖杯的人获胜。支持 2-4 人混玩，可以加入 🤖 机器人凑数。
 
 ---
 
-## 🎮 Features / 功能
-
-- **40-tile Board** with clubs, sponsors, banks, jail, airport, training camp, youth academy, and more
-- **71 Player Cards** across 4 pools (Food, Animal, Transfer Window, Youth Academy)
-- **Six-Attribute Battle System** — home advantage, GK rules, golden goal, forfeit
-- **5-Level League Table** — domestic league through Champions League, with trophies
-- **Transfer Window** — multi-player bidding auction
-- **Random Events** (9 types) — lottery, oil strike, tax audit, peak duel, etc.
-- **Training Camp** — spend training points to boost player attributes
-- **Resident Players** — each club gets a bound player at Level 3
-- **Save/Load** (2 slots) via localStorage
-- **🤖 Bot Mode** — random-choice AI with 2s visual highlight
-- **Loan & Repayment** system with interest
-- **Dice Animation** — 1s spinning dice in board center
-
----
-
-## 🚀 Quick Start / 快速开始
+## 🚀 快速开始
 
 ```bash
 cd Football-Monopoly
@@ -31,91 +12,52 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/` in your browser.
+浏览器打开 `http://localhost:5173/`
 
 ---
 
-## 🏗️ Tech Stack / 技术栈
+## 🛠 技术栈
 
-| Tech | Usage |
-|------|-------|
-| React 18 | UI framework |
-| TypeScript | Type safety |
-| Vite 6 | Build tool |
-| CSS Modules | Scoped styling |
-| localStorage | Save/Load |
+React 18 · TypeScript · Vite 6 · CSS Modules · localStorage
 
 ---
 
-## 📁 Project Structure / 项目结构
+## 🎮 玩法概要
+
+- **40 格棋盘**：俱乐部、赞助商、银行、监狱、机场、训练营、青训学院等
+- **71 名球员**：街头食物组、动物组、转会窗、青训盲盒、驻守球员
+- **六维对战**：速度/射门/传球/盘带/防守/身体，主场+1，门将特殊规则，金球决胜
+- **五级联赛**：国内联赛→国内杯赛→欧协联→欧联→欧冠，每级独立积分榜+奖杯
+- **转会窗竞价**：多人轮流加价，价高者得
+- **训练营**：消耗训练点全属性+1
+- **随机事件**：刮彩票、挖石油、特大丑闻、球场漏水、财政公平、燃放焰火、车水马龙、巅峰对决、税务稽查
+- **银行系统**：存款+2%/回合，贷款+5%/回合，随时还贷
+- **胜利条件**：资金≥100kw + 3座五级球场 + 欧冠冠军
+
+---
+
+## 📁 项目结构
 
 ```
 src/
-├── ai/                  # AI engine (removed, now in DiceRoller)
-├── components/
-│   ├── Board/           # 11×11 game board
-│   ├── Cell/            # Individual tile
-│   ├── DiceAnimation/   # Spinning dice overlay
-│   ├── DiceRoller/      # Action bar + bot logic
-│   ├── LeaguePanel/     # 5 league tables
-│   ├── MatchPanel/      # Battle UI (split screen)
-│   ├── PlayerCard/      # Player stat card
-│   ├── PlayerToken/     # Player position marker
-│   ├── SavePanel/       # Save/Load buttons
-│   ├── SetupScreen/     # Game setup (players, colors, AI)
-│   └── StatsPanel/      # Right sidebar (assets, players, victory conditions)
-├── data/
-│   ├── board.ts         # 40 tiles definition
-│   └── players.ts       # 71 player cards database
-├── state/
-│   ├── GameContext.tsx   # React context provider
-│   ├── gameReducer.ts   # Core game logic (~2500 lines)
-│   └── initialState.ts  # Initial state & pools
-├── utils/
-│   └── gameLogic.ts     # Dice, finance, net worth
-├── types.ts             # All TypeScript types
-├── App.tsx
-├── App.module.css
-├── main.tsx
-└── index.css
+├── components/       # React 组件
+│   ├── Board/        # 11×11 棋盘
+│   ├── Cell/         # 格子
+│   ├── DiceAnimation/# 掷骰子动画
+│   ├── DiceRoller/   # 操作台 + 机器人逻辑
+│   ├── LeaguePanel/  # 五级联赛积分榜
+│   ├── MatchPanel/   # 对战界面
+│   ├── SavePanel/    # 存档/读档
+│   ├── SetupScreen/  # 开局设置
+│   └── StatsPanel/   # 右侧资产栏
+├── data/             # 棋盘数据 + 球员数据库
+├── state/            # 游戏状态管理（Context + Reducer）
+├── utils/            # 工具函数
+└── types.ts          # TypeScript 类型定义
 ```
 
 ---
 
-## 🎲 Game Rules Summary / 规则概要
-
-### Setup
-- 2–4 players (any mix of human and 🤖 bot)
-- Starting cash: 10kw
-
-### Turn Flow
-Roll dice (1d6) → move → land on tile → take action → end turn
-
-### Victory Conditions (all 3 required)
-1. ☑ Capital (cash + savings − debt) ≥ 100kw
-2. ☑ Own 3+ Level-5 stadiums
-3. ☑ Have won a Champions League trophy
-
-### Battle System
-- Match level = defending club's stadium level
-- Each side fields up to `level` players per match
-- Per round: both pick 1 player → dice (1-6) selects attribute → compare values
-- GK vs outfield: GK uses OVR, outfield uses rolled attribute
-- Home advantage: +1 to all home player attributes
-- Golden goal: tied after all rounds → sudden death
-- Empty squad: remaining rounds auto-awarded to side with players
-
-### Finance
-- Savings interest: +2% per round
-- Loan interest: +5% per round
-- Bankruptcy: debt ≥ 50kw
-
-### Player Growth
-- Match participation: compared attribute +1
-- Training camp: all 6 attributes +1 per training point
-
----
-
-## 👤 Author
+## 👤 作者
 
 Built with ❤️ and Claude Code
