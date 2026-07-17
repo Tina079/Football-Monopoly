@@ -66,4 +66,4 @@ src/
 
 ## 👤 作者
 
-Built with ❤️ and Claude Code
+一名为世界杯心碎的拜仁球迷
