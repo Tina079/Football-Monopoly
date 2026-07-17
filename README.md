@@ -5,12 +5,18 @@
 ---
 
 ## 🚀 快速开始
+<<<<<<< HEAD
 
 ### 点击即玩
 
 👉 [football-monopoly.netlify.app](https://football-monopoly.netlify.app)
 
 ### 本地部署
+=======
+联网：https://football-monopoly.netlify.app
+
+本地：
+>>>>>>> 9411361e65cb145fbd00854eaaf18be586680dd0
 
 ```bash
 cd Football-Monopoly
@@ -66,4 +72,8 @@ src/
 
 ## 👤 作者
 
+<<<<<<< HEAD
 Built with ❤️ and Claude Code
+=======
+一名为世界杯心碎的拜仁球迷
+>>>>>>> 9411361e65cb145fbd00854eaaf18be586680dd0
