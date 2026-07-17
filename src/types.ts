@@ -272,4 +272,5 @@ export type GameAction =
   // 联赛结算
   | { type: 'SETTLE_LEAGUE'; level: number }
   | { type: 'EXECUTE_BANKRUPT' }
+  | { type: 'EXECUTE_BANKRUPT_ID'; playerId: number }
   | { type: 'FORFEIT_MATCH'; side: 'home' | 'away' };

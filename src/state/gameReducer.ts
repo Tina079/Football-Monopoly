@@ -336,6 +336,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         case 'END_TURN':
           return gameReducer(state, { type: 'END_TURN' });
         case 'EXECUTE_BANKRUPT':
+          if (args.length > 0) return gameReducer(state, { type: 'EXECUTE_BANKRUPT_ID', playerId: parseInt(args[0]) });
           return gameReducer(state, { type: 'EXECUTE_BANKRUPT' });
         case 'PEAK_DUEL_SELECT':
           return startPeakDuelSelect(state);
@@ -1335,6 +1336,19 @@ function settleLeague(state: GameState, level: number): GameState {
       return advancePlayer(bankruptState);
     }
 
+    // ===== 宣告破产（ROUND_SETTLEMENT中，指定玩家） =====
+    case 'EXECUTE_BANKRUPT_ID': {
+      const playerId = action.playerId!;
+      const bp = state.players[playerId];
+      if (!bp || bp.isBankrupt) return advancePlayer(state);
+      const newPlayers = state.players.map((pl, i) => i !== playerId ? pl : { ...pl, isBankrupt: true });
+      let bankruptState = cleanupBankruptPlayer({ ...state, players: newPlayers, pendingAction: null }, playerId);
+      bankruptState = log(bankruptState, `💀 ${bp.name} 宣告破产！负债 ${bp.debt.toFixed(2)}kw，球员回池，地产清空。`);
+      const winState = checkWin(bankruptState);
+      if (winState.phase === 'finished') return winState;
+      return advancePlayer(bankruptState);
+    }
+
     // ===== 结束当前行动（回合末） =====
     case 'END_TURN': {
       const p = currentPlayer(state);
@@ -1410,7 +1424,7 @@ function settleLeague(state: GameState, level: number): GameState {
           pendingAction: {
             type: 'post_move',
             message: `💀 ${bp.name} 负债达到 ${bp.debt.toFixed(2)}kw（上限 ${BANKRUPT_DEBT}kw），必须退出足坛！`,
-            options: [{ label: '宣告破产', action: 'EXECUTE_BANKRUPT' }],
+            options: [{ label: '宣告破产', action: `EXECUTE_BANKRUPT:${bp.id}` }],
           },
         };
 
@@ -1511,7 +1525,7 @@ function handleLanding(state: GameState, position: number): GameState {
             type: 'buy_club',
             message: `${cell.name} 无人所有，是否以 2kw 购买？（${cell.league}俱乐部）`,
             options: [
-              { label: '购买 (2kw)', action: `BUY_CLUB:${position}` },
+              { label: '购买 (2kw)', action: `BUY_CLUB:${position}`, disabled: p.cash < 2 },
               { label: '不买', action: 'SKIP_BUY' },
             ],
             cellId: position,
@@ -1585,7 +1599,7 @@ function handleLanding(state: GameState, position: number): GameState {
             type: 'buy_sponsor',
             message: `${cell.name} 无人所有，是否以 ${cell.price}kw 购买？（他人停留需支付 ${payout}kw）`,
             options: [
-              { label: `购买 (${cell.price}kw)`, action: `BUY_SPONSOR:${position}` },
+              { label: `购买 (${cell.price}kw)`, action: `BUY_SPONSOR:${position}`, disabled: p.cash < (cell.price || 0) },
               { label: '不买', action: 'SKIP_BUY' },
             ],
             cellId: position,
@@ -1827,10 +1841,11 @@ function startPeakDuelSelect(state: GameState): GameState {
   const myClubs = getPlayerClubs(p.id, state.cellOwners, state.cellLevels, state.instances);
   const canFight = myClubs.some(c => c.count > 0);
   if (!canFight) {
+    const msg = `😞 ${p.name} 没有可出战的球队，巅峰对决失败！罚款 2kw。`;
     const { newState: afterPay, hadToLoan } = forcePay(state, state.currentPlayerIndex, 2);
     let s = afterPay;
     if (hadToLoan) s = log(s, `🚨 ${p.name} 现金不足，自动紧急贷款！`);
-    return skipAndEnd(log(s, `😞 ${p.name} 没有可出战的球队，巅峰对决失败！罚款 2kw。`));
+    return { ...log(s, msg), pendingAction: { type: 'post_move', message: msg, options: [{ label: `支付 2kw`, action: 'OK' }] } };
   }
   const opponents = state.players.filter(pl => pl.id !== p.id && !pl.isBankrupt).map(pl => ({
     label: pl.name,
@@ -1845,8 +1860,9 @@ function startPeakDuelMatch(state: GameState, opponentId: number): GameState {
   const oppClubs = getPlayerClubs(opponentId, state.cellOwners, state.cellLevels, state.instances);
   const oppCanFight = oppClubs.some(c => c.count > 0);
   if (!oppCanFight) {
+    const msg = `🎉 ${opp.name} 没有可出战的球队，${p.name} 巅峰对决直接获胜！+5kw！`;
     const newPlayers = state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, cash: Math.round((pl.cash + 5) * 100) / 100 });
-    return skipAndEnd(log({ ...state, players: newPlayers }, `🎉 ${opp.name} 没有可出战的球队，${p.name} 巅峰对决直接获胜！+5kw！`));
+    return { ...log({ ...state, players: newPlayers }, msg), pendingAction: { type: 'post_move', message: msg, options: [{ label: '领取 5kw', action: 'OK' }] } };
   }
   // 双方选择自己的球队
   const myClubs = getPlayerClubs(p.id, state.cellOwners, state.cellLevels, state.instances).filter(c => c.count > 0);
@@ -2065,7 +2081,7 @@ function handleMatchIncome(state: GameState, choice: string, amount: number, cel
         type: 'upgrade',
         message: `是否升级 ${cell.name}？${levelNames[level]} → ${levelNames[level+1]}（可参加${tol[level+1]}），需要 ${nextCost}kw`,
         options: [
-          { label: `升级 (${nextCost}kw)`, action: `UPGRADE:${cellId}` },
+          { label: `升级 (${nextCost}kw)`, action: `UPGRADE:${cellId}`, disabled: p.cash < nextCost },
           { label: '暂不升级', action: 'SKIP_UPGRADE' },
         ],
         cellId,
@@ -2204,17 +2220,17 @@ function buildBankMenu(p: GameState['players'][0], isBranch: boolean): PendingAc
   const max = isBranch ? 5 : 10;
   const min = isBranch ? 2 : 5;
   const opts: ActionOption[] = [
-    { label: `存款 ${min}kw`, action: `DEPOSIT:${min}` },
-    { label: `存款 ${max}kw`, action: `DEPOSIT:${max}` },
-    { label: `取款 ${min}kw`, action: `WITHDRAW:${min}` },
-    { label: `取款 ${max}kw`, action: `WITHDRAW:${max}` },
+    { label: `存款 ${min}kw`, action: `DEPOSIT:${min}`, disabled: p.cash < min },
+    { label: `存款 ${max}kw`, action: `DEPOSIT:${max}`, disabled: p.cash < max },
+    { label: `取款 ${min}kw`, action: `WITHDRAW:${min}`, disabled: p.savings < min },
+    { label: `取款 ${max}kw`, action: `WITHDRAW:${max}`, disabled: p.savings < max },
     { label: `贷款 ${min}kw`, action: `TAKE_LOAN:${min}` },
     { label: `贷款 ${max}kw`, action: `TAKE_LOAN:${max}` },
   ];
   if (p.debt > 0) {
-    opts.push({ label: `还款 ${min}kw`, action: `REPAY_LOAN:${min}` });
-    opts.push({ label: `还款 ${max}kw`, action: `REPAY_LOAN:${max}` });
-    opts.push({ label: `全部还清 (${p.debt}kw)`, action: `REPAY_LOAN:${p.debt}` });
+    opts.push({ label: `还款 ${min}kw`, action: `REPAY_LOAN:${min}`, disabled: p.cash < min });
+    opts.push({ label: `还款 ${max}kw`, action: `REPAY_LOAN:${max}`, disabled: p.cash < max });
+    opts.push({ label: `全部还清 (${p.debt}kw)`, action: `REPAY_LOAN:${p.debt}`, disabled: p.cash < p.debt });
   }
   opts.push({ label: '离开', action: 'DECLINE_LOAN' });
   return {
@@ -2413,16 +2429,9 @@ function advancePlayer(state: GameState): GameState {
 
   // 跳过在监狱中的玩家
   let nextIdx = currentPlayerIndex;
+  let updatedPlayers = [...players];
 
-  // 先对当前玩家减刑（坐牢的当前玩家）
-  let updatedPlayers = players.map((pl, i) => {
-    if (i === currentPlayerIndex && pl.jailTurns > 0) {
-      const newT = pl.jailTurns - 1;
-      return { ...pl, jailTurns: newT };
-    }
-    return pl;
-  });
-  // 找下一个可行动的玩家，跳过坐牢玩家并减刑
+  // 找下一个可行动的玩家，遇到坐牢的跳过并减刑
   let loggedState: GameState | null = null;
   for (let attempt = 0; attempt < totalPlayers; attempt++) {
     nextIdx = (nextIdx + 1) % totalPlayers;

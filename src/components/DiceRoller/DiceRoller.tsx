@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext';
 import { BOARD_CELLS } from '../../data/board';
+import { ALL_PLAYERS } from '../../data/players';
 import SavePanel from '../SavePanel/SavePanel';
 import styles from './DiceRoller.module.css';
 
@@ -15,7 +16,16 @@ export default function ActionBar() {
   // ===== 机器人自动操作 =====
   const [botPicked, setBotPicked] = useState<string | null>(null);
   const botTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isBot = players[currentPlayerIndex]?.isAI && !players[currentPlayerIndex]?.isBankrupt && phase === 'playing';
+  // 转会竞价时看当前出价者/得标者，否则看当前回合玩家
+  const botCheckId = (() => {
+    if (transferBidState?.phase === 'bidding') return transferBidState.bidders[transferBidState.bidderIndex];
+    if (pendingAction?.type === 'assign_player' && pendingAction.instanceUid) {
+      const inst = state.instances.find(i => i.uid === pendingAction.instanceUid);
+      if (inst) return inst.ownerId;
+    }
+    return currentPlayerIndex;
+  })();
+  const isBot = players[botCheckId]?.isAI && !players[botCheckId]?.isBankrupt && phase === 'playing';
   const botColor = players[currentPlayerIndex]?.color || '#f0c060';
 
   // ===== 比赛结果/空阵判定 1.5s 全员自动推进 =====
@@ -28,6 +38,7 @@ export default function ActionBar() {
   }, [pendingAction?.type, pendingAction?.message]);
 
   // ===== 机器人自动操作 =====
+  const botPlayer = players[botCheckId];
   useEffect(() => {
     if (!isBot) { setBotPicked(null); return; }
 
@@ -53,9 +64,98 @@ export default function ActionBar() {
     if (!pendingAction || pendingAction.options.length === 0) { setBotPicked(null); return; }
     const enabled = pendingAction.options.filter((o: { disabled?: boolean }) => !o.disabled);
     const pick = enabled.length > 0 ? enabled : pendingAction.options;
-    const chosen = pick[Math.floor(Math.random() * pick.length)];
+
+    // 智能选择：优先理性操作
+    let chosen = pick[Math.floor(Math.random() * pick.length)];
+    const p = botPlayer;
+    if (p && pendingAction?.type === 'loan') {
+      const repayAll = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:') && o.action.includes('全部'));
+      const repayBig = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:10') || o.action.startsWith('REPAY_LOAN:5'));
+      const withdrawBig = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:10') || o.action.startsWith('WITHDRAW:5'));
+      const withdrawAny = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:'));
+      const leave = pick.find((o: { action: string }) => o.action === 'DECLINE_LOAN');
+      if (p.debt > 0 && p.cash >= 5 && repayBig) chosen = repayBig;
+      else if (p.debt > 0 && repayAll && p.cash >= p.debt) chosen = repayAll;
+      else if (p.debt > 0 && p.savings >= 5 && withdrawBig) {
+        chosen = withdrawBig; // 现金不够还债但存款有，先取出来
+      } else if (p.debt > 0 && p.savings > 0 && withdrawAny) {
+        chosen = withdrawAny;
+      } else if (p.debt > 0) {
+        if (leave) chosen = leave;
+      } else if (p.cash < 5 && p.savings > 5 && withdrawBig) {
+        chosen = withdrawBig;
+      } else if (p.cash < 5) {
+        if (leave) chosen = leave;
+      }
+    }
+    if (p && pendingAction?.type === 'transfer_bid') {
+      // 有空位且有钱 → 优先竞拍；否则离开
+      const bidOpt = pick.find((o: { action: string }) => o.action.startsWith('PLACE_BID') || o.action.startsWith('START_BID'));
+      const leaveOpt = pick.find((o: { action: string }) => o.action === 'SKIP_TRANSFER' || o.action === 'PASS_BID');
+      if (bidOpt && !bidOpt.disabled) chosen = bidOpt;
+      else if (leaveOpt) chosen = leaveOpt;
+    }
+    if (p && pendingAction?.type === 'transfer_sell') {
+      // 负债 ≥ 20kw 时优先卖人，≥ 10kw 时也可卖
+      const sellOpt = pick.find((o: { action: string }) => o.action.startsWith('SELL_PLAYER'));
+      const leaveOpt = pick.find((o: { action: string }) => o.action === 'SKIP_TRANSFER');
+      if (p.debt >= 20 && sellOpt) chosen = sellOpt;
+      else if (p.debt >= 10 && sellOpt && Math.random() < 0.5) chosen = sellOpt;
+      else if (leaveOpt) chosen = leaveOpt;
+    }
+    if (p && pendingAction?.type === 'upgrade') {
+      // 所有球场剩余空位 ≤ 1 时一定升级
+      const totalSlots = Object.entries(state.cellOwners)
+        .filter(([, oid]) => oid === p.id)
+        .reduce((sum, [cid]) => sum + (state.cellLevels[parseInt(cid)] || 1), 0);
+      const totalPlayers = state.instances.filter(i => i.ownerId === p.id).length;
+      if (totalSlots - totalPlayers <= 1) {
+        const upOpt = pick.find((o: { action: string }) => o.action.startsWith('UPGRADE'));
+        if (upOpt && !upOpt.disabled) chosen = upOpt;
+      }
+    }
+    if (p && pendingAction?.type === 'visit_or_challenge') {
+      const challOpt = pick.find((o: { action: string; disabled?: boolean }) => o.action.startsWith('CHALLENGE') && !o.disabled);
+      if (challOpt) {
+        // 主场没球员 → 必挑战；有球员 → 随机
+        const homeHasPlayers = state.instances.some(i => i.clubId === pendingAction?.cellId);
+        if (!homeHasPlayers || Math.random() < 0.5) chosen = challOpt;
+      }
+    }
+    if (p && pendingAction?.type === 'match_setup') {
+      // 选人数最多的球队，平手选平均OVR最高的
+      const matchOpts = pick.filter((o: { action: string; disabled?: boolean }) => o.action.startsWith('START_MATCH') && !o.disabled);
+      if (matchOpts.length > 0) {
+        let best = matchOpts[0], bestCount = 0, bestOvr = 0;
+        for (const opt of matchOpts) {
+          const cid = parseInt(opt.action.split(':')[2]);
+          const count = state.instances.filter(i => i.clubId === cid).length;
+          const avgOvr = count > 0 ? state.instances.filter(i => i.clubId === cid).reduce((s, i) => { const c = ALL_PLAYERS.find(x => x.id === i.cardId); return s + (c?.ovr || 0); }, 0) / count : 0;
+          if (count > bestCount || (count === bestCount && avgOvr > bestOvr)) { best = opt; bestCount = count; bestOvr = avgOvr; }
+        }
+        chosen = best;
+      }
+    }
+    if (p && (pendingAction?.type === 'street_food' || pendingAction?.type === 'street_animal')) {
+      // 街头足球：能买就买
+      const buy = pick.find((o: { action: string }) => o.action.startsWith('BUY_STREET'));
+      if (buy && !buy.disabled) chosen = buy;
+    }
+    // 比赛日收入：有负债优先还贷
+    if (p && pendingAction?.type === 'visit_or_challenge' && pendingAction.options.some((o: { action: string }) => o.action.startsWith('MATCH_INCOME:repay'))) {
+      const repay = pick.find((o: { action: string }) => o.action.startsWith('MATCH_INCOME:repay'));
+      if (repay && p.debt > 0) chosen = repay;
+      else if (p.cash < 5) {
+        const cash = pick.find((o: { action: string }) => o.action.startsWith('MATCH_INCOME:cash'));
+        if (cash) chosen = cash;
+      }
+    }
+
+    // 兜底：选最后一个（通常是"离开"/"不买"等安全选项）
+    const fallback = pick[pick.length - 1];
 
     setBotPicked(chosen.action);
+    const startTime = Date.now();
     botTimer.current = setTimeout(() => {
       const act = chosen.action;
       if (act === 'END_TURN') dispatch({ type: 'END_TURN' });
@@ -65,7 +165,15 @@ export default function ActionBar() {
       setBotPicked(null);
     }, 2000);
 
-    return () => { if (botTimer.current) clearTimeout(botTimer.current); };
+    // 超时兜底：5s 后如果还没动作，强制选最后一个
+    const safetyTimer = setTimeout(() => {
+      if (Date.now() - startTime > 4000) {
+        dispatch({ type: 'CHOOSE_ACTION', action: fallback.action, cellId: pendingAction?.cellId });
+        setBotPicked(null);
+      }
+    }, 5000);
+
+    return () => { if (botTimer.current) clearTimeout(botTimer.current); clearTimeout(safetyTimer); };
   }, [isBot, pendingAction?.type, pendingAction?.message, matchState?.phase, matchState?.round, matchState?.homePick, matchState?.awayPick]);
 
   // ===== 正常渲染 =====
