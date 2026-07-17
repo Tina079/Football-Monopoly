@@ -6,6 +6,12 @@
 
 ## 🚀 快速开始
 
+### 点击即玩
+
+👉 [football-monopoly.netlify.app](https://football-monopoly.netlify.app)
+
+### 本地部署
+
 ```bash
 cd Football-Monopoly
 npm install
