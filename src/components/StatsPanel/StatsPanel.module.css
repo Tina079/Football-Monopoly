@@ -38,6 +38,8 @@
 
 .playerCard.bankrupt {
   opacity: 0.4;
+  padding: 8px 12px;
+  margin-bottom: 6px;
 }
 
 .playerHeader {
@@ -74,6 +76,13 @@
   padding: 1px 6px;
   border-radius: 6px;
 }
+
+.reportMiniBtn {
+  font-size: 10px; margin-left: 6px; padding: 1px 8px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px; color: #888; cursor: pointer;
+}
+.reportMiniBtn:hover { background: rgba(240,192,96,0.12); color: #f0c060; }
 
 .badgeJail {
   font-size: 10px;

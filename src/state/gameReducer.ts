@@ -20,6 +20,53 @@ function log(state: GameState, msg: string): GameState {
   return { ...state, log: [msg, ...state.log].slice(0, 20) };
 }
 
+// ========== 大事记辅助 ==========
+function pushEvent(state: GameState, playerId: number, icon: string, text: string): GameState {
+  return { ...state, events: [...state.events, { turn: state.turn, playerId, icon, text }] };
+}
+
+// ========== 统计辅助 ==========
+function addIncome(state: GameState, pid: number, amt: number): GameState {
+  if (amt <= 0 || !state.playerStats[pid]) return state;
+  const s = state.playerStats[pid];
+  return { ...state, playerStats: { ...state.playerStats, [pid]: { ...s, totalIncome: Math.round((s.totalIncome + amt) * 100) / 100 } } };
+}
+function addSpending(state: GameState, pid: number, amt: number): GameState {
+  if (amt <= 0 || !state.playerStats[pid]) return state;
+  const s = state.playerStats[pid];
+  return { ...state, playerStats: { ...state.playerStats, [pid]: { ...s, totalSpent: Math.round((s.totalSpent + amt) * 100) / 100 } } };
+}
+function addJail(state: GameState, pid: number): GameState {
+  if (!state.playerStats[pid]) return state;
+  const s = state.playerStats[pid];
+  return { ...state, playerStats: { ...state.playerStats, [pid]: { ...s, jailCount: s.jailCount + 1 } } };
+}
+function addMatch(state: GameState, pid: number, won: boolean): GameState {
+  if (!state.playerStats[pid]) return state;
+  const s = state.playerStats[pid];
+  return { ...state, playerStats: { ...state.playerStats, [pid]: { ...s, matchesPlayed: s.matchesPlayed + 1, matchesWon: s.matchesWon + (won ? 1 : 0) } } };
+}
+function addChampionship(state: GameState, pid: number): GameState {
+  if (!state.playerStats[pid]) return state;
+  const s = state.playerStats[pid];
+  return { ...state, playerStats: { ...state.playerStats, [pid]: { ...s, championships: s.championships + 1 } } };
+}
+
+function getPropertyValue(state: GameState, playerId: number): number {
+  let total = 0;
+  for (const [cid, ownerId] of Object.entries(state.cellOwners)) {
+    if (ownerId !== playerId) continue;
+    const cell = BOARD_CELLS[parseInt(cid)];
+    if (!cell) continue;
+    const level = state.cellLevels[parseInt(cid)] || 1;
+    // 购买价 + 累计升级费
+    let val = cell.price || 0;
+    for (let lv = 1; lv < level; lv++) val += UPGRADE_COSTS[lv] || 0;
+    total += val;
+  }
+  return total;
+}
+
 // ========== 强制扣费（不足时自动紧急贷款） ==========
 function forcePay(
   state: GameState,
@@ -93,6 +140,20 @@ function checkLastPlayerStanding(state: GameState): GameState | null {
       },
     };
   }
+  // 全员破产 → 最后破产者"获胜"
+  if (alive.length === 0) {
+    const lastOne = state.players.reduce((a, b) => (a.bankruptTurn || 0) > (b.bankruptTurn || 0) ? a : b);
+    return {
+      ...state,
+      phase: 'finished',
+      winner: lastOne.id,
+      pendingAction: {
+        type: 'post_move',
+        message: `💀 全员破产！${lastOne.name} 坚持到了最后。`,
+        options: [{ label: '再来一局', action: 'RESET' }],
+      },
+    };
+  }
   return null;
 }
 
@@ -101,14 +162,23 @@ function checkWin(state: GameState): GameState {
   return checkNetWorthWin(state) || checkLastPlayerStanding(state) || state;
 }
 
-// ========== 主 Reducer ==========
-export function gameReducer(state: GameState, action: GameAction): GameState {
+// ========== 主 Reducer（核心） ==========
+function gameReducerCore(state: GameState, action: GameAction): GameState {
   switch (action.type) {
 
     // ===== 读取存档 =====
     case 'LOAD_GAME': {
       const s = action.state;
-      return { ...s, phase: 'playing', diceAnimating: false, pendingAction: s.pendingAction || { type: 'post_move', message: `${s.players[s.currentPlayerIndex]?.name ?? '?'} 的回合`, options: [{ label: '掷骰子', action: 'ROLL_DICE' }] } };
+      return { ...s, phase: 'playing', diceAnimating: false,
+        // 兼容旧存档：补上缺失字段
+        players: s.players.map(p => ({ ...p, bankruptTurn: p.bankruptTurn ?? (p.isBankrupt ? s.turn : 0) })),
+        snapshots: s.snapshots || [],
+        playerStats: s.playerStats || Object.fromEntries(s.players.map(p => [p.id, { totalIncome: 0, totalSpent: 0, jailCount: 0, matchesPlayed: 0, matchesWon: 0, championships: 0 }])),
+        events: s.events || [],
+        bankruptTeams: s.bankruptTeams || {},
+        clubTrophies: s.clubTrophies ? Object.fromEntries(Object.entries(s.clubTrophies).map(([k, v]) => [k, typeof v === 'number' ? { total: v, byLevel: [0,0,0,0,0,0] } : v])) : {},
+        pendingAction: s.pendingAction || { type: 'post_move', message: `${s.players[s.currentPlayerIndex]?.name ?? '?'} 的回合`, options: [{ label: '掷骰子', action: 'ROLL_DICE' }] },
+      };
     }
 
     // ===== 开始游戏 =====
@@ -125,6 +195,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         properties: [],
         jailTurns: 0,
         isBankrupt: false,
+        bankruptTurn: 0,
       }));
       const playerCount = players.length;
       const pools = initPlayerPools();
@@ -156,6 +227,11 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         peakDuel: false,
         transferBidState: null,
         leagueTables,
+        // 赛后报告初始化
+        snapshots: [],
+        playerStats: Object.fromEntries(players.map(p => [p.id, { totalIncome: 0, totalSpent: 0, jailCount: 0, matchesPlayed: 0, matchesWon: 0, championships: 0 }])),
+        events: [],
+        bankruptTeams: {},
       };
     }
 
@@ -223,29 +299,29 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       const [cmd, ...args] = choice.split(':');
       switch (cmd) {
         case 'ROLL_DICE':
-          return gameReducer(state, { type: 'START_DICE_ANIMATION' });
+          return gameReducerCore(state, { type: 'START_DICE_ANIMATION' });
         case 'MOVE':
-          return gameReducer(state, { type: 'MOVE_PLAYER', steps: parseInt(args[0]) });
+          return gameReducerCore(state, { type: 'MOVE_PLAYER', steps: parseInt(args[0]) });
         case 'BUY_CLUB':
-          return gameReducer(state, { type: 'BUY_PROPERTY', cellId: cellId! });
+          return gameReducerCore(state, { type: 'BUY_PROPERTY', cellId: cellId! });
         case 'BUY_STREET':
-          return gameReducer(state, { type: 'BUY_STREET_PLAYER', cardId: args[0] });
+          return gameReducerCore(state, { type: 'BUY_STREET_PLAYER', cardId: args[0] });
         case 'SKIP_STREET':
-          return gameReducer(state, { type: 'SKIP_STREET_PLAYER' });
+          return gameReducerCore(state, { type: 'SKIP_STREET_PLAYER' });
         case 'ASSIGN':
-          return gameReducer(state, { type: 'ASSIGN_PLAYER', instanceUid: args[0], clubId: parseInt(args[1]) });
+          return gameReducerCore(state, { type: 'ASSIGN_PLAYER', instanceUid: args[0], clubId: parseInt(args[1]) });
         case 'RELEASE':
-          return gameReducer(state, { type: 'RELEASE_PLAYER', instanceUid: args[0] });
+          return gameReducerCore(state, { type: 'RELEASE_PLAYER', instanceUid: args[0] });
         case 'START_BID':
-          return gameReducer(state, { type: 'START_TRANSFER_BID', cardId: args[0] });
+          return gameReducerCore(state, { type: 'START_TRANSFER_BID', cardId: args[0] });
         case 'PLACE_BID':
-          return gameReducer(state, { type: 'PLACE_BID', amount: parseFloat(args[0]) });
+          return gameReducerCore(state, { type: 'PLACE_BID', amount: parseFloat(args[0]) });
         case 'PASS_BID':
-          return gameReducer(state, { type: 'PASS_BID' });
+          return gameReducerCore(state, { type: 'PASS_BID' });
         case 'SELECT_SELL':
           return handleSellSelection(state);
         case 'SELL_PLAYER':
-          return gameReducer(state, { type: 'START_TRANSFER_SELL', instanceUid: args[0] });
+          return gameReducerCore(state, { type: 'START_TRANSFER_SELL', instanceUid: args[0] });
         case 'SKIP_TRANSFER':
           return skipAndEnd(state);
         case 'LOSS_TRANSFER':
@@ -269,43 +345,43 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
             case 0: { const bonus = parseFloat(evtArgs[0]) || 1; evtNewState = log({ ...state, players: state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, cash: Math.round((pl.cash + bonus) * 100) / 100 }) }, `🎲 ${evtP.name} 刮出彩票，中奖 ${bonus}kw！`); break; }
             case 1: evtNewState = log({ ...state, players: state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, cash: Math.round((pl.cash + 10) * 100) / 100 }) }, `🎲 ${evtP.name} 挖出石油，获得 10kw！`); break;
             case 2: { const halved = parseFloat(evtArgs[0]) || 0; evtNewState = log({ ...state, players: state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, cash: halved }) }, `🎲 ${evtP.name} 被曝光特大丑闻，现金折半！`); break; }
-            case 3: { const act = evtArgs[0]; const cid = parseInt(evtArgs[1]); if (act === 'lose') return startStadiumLossFlow(state, cid); else { const nl = (state.cellLevels[cid] || 1) - 1; const overflow = state.instances.filter(i => i.clubId === cid).length - nl; if (overflow > 0) return startStadiumOverflowFlow(state, cid, nl); evtNewState = log({ ...state, cellLevels: { ...state.cellLevels, [cid]: nl } }, `🎲 ${BOARD_CELLS[cid].name} 降级到 Lv${nl}。`); } break; }
+            case 3: { const act = evtArgs[0]; const cid = parseInt(evtArgs[1]); if (act === 'lose') return startStadiumLossFlow(state, cid); else return applyStadiumDowngrade(state, cid); }
             case 4: { const tf = parseFloat(evtArgs[0]) || 0; const rid = parseInt(evtArgs[1]); const pid = parseInt(evtArgs[2]); evtNewState = log({ ...state, players: state.players.map((pl, i) => { if (i === rid) return { ...pl, cash: Math.round((pl.cash - tf) * 100) / 100 }; if (i === pid) return { ...pl, cash: Math.round((pl.cash + tf) * 100) / 100 }; return pl; }) }, `🎲 财政公平！${state.players[rid].name} 支付 ${tf}kw 给 ${state.players[pid].name}。`); break; }
             case 5: { const fine = parseFloat(evtArgs[0]) || 0; const { newState: afterPay, hadToLoan } = forcePay(state, state.currentPlayerIndex, fine); evtNewState = afterPay; if (hadToLoan) evtNewState = log(evtNewState, `🚨 ${evtP.name} 现金不足，自动紧急贷款！`); evtNewState = log(evtNewState, `🎲 ${evtP.name} 违规燃放焰火，被罚款 ${fine}kw！`); break; }
             case 6: { const income = parseFloat(evtArgs[0]) || 0; evtNewState = log({ ...state, players: state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, cash: Math.round((pl.cash + income) * 100) / 100 }) }, `🎲 ${evtP.name} 的球场周边车水马龙，增收 ${income}kw！`); break; }
             case 8: { const tax = parseFloat(evtArgs[0]) || 0; const rid = parseInt(evtArgs[1]); evtNewState = log({ ...state, players: state.players.map((pl, i) => i === rid ? { ...pl, cash: Math.round((pl.cash - tax) * 100) / 100 } : pl) }, `🎲 税务稽查！${state.players[rid].name} 缴纳了 ${tax}kw 税款。`); break; }
-            case 9: { const cleared = parseFloat(evtArgs[0]) || 0; evtNewState = log({ ...state, players: state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, debt: 0 }) }, `🍀 绝处逢生！${evtP.name} 的 ${cleared}kw 负债被一笔勾销！`); break; }
+            case 9: { const cleared = parseFloat(evtArgs[0]) || 0; evtNewState = log({ ...state, players: state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, debt: 0 }) }, `🍀 绝处逢生！${evtP.name} 的 ${cleared}kw 负债被一笔勾销！`); evtNewState = pushEvent(evtNewState, state.currentPlayerIndex, '🍀', `${cleared}kw`); break; }
           }
           return skipAndEnd(evtNewState);
         }
         case 'START_MATCH':
-          return gameReducer(state, { type: 'START_MATCH', homeClubId: parseInt(args[0]), awayClubId: parseInt(args[1]) });
+          return gameReducerCore(state, { type: 'START_MATCH', homeClubId: parseInt(args[0]), awayClubId: parseInt(args[1]) });
         case 'CONFIRM_MATCH_RESULT':
-          return gameReducer(state, { type: 'CONFIRM_MATCH_RESULT' });
+          return gameReducerCore(state, { type: 'CONFIRM_MATCH_RESULT' });
         case 'ROLL_MATCH_DICE':
-          return gameReducer(state, { type: 'ROLL_MATCH_DICE' });
+          return gameReducerCore(state, { type: 'ROLL_MATCH_DICE' });
         case 'OPEN_MATCH':
           return { ...state, pendingAction: null };
         case 'BUY_SPONSOR':
-          return gameReducer(state, { type: 'BUY_SPONSOR', cellId: cellId! });
+          return gameReducerCore(state, { type: 'BUY_SPONSOR', cellId: cellId! });
         case 'UPGRADE':
-          return gameReducer(state, { type: 'UPGRADE_CLUB', cellId: cellId! });
+          return gameReducerCore(state, { type: 'UPGRADE_CLUB', cellId: cellId! });
         case 'PAY_VISIT':
-          return gameReducer(state, { type: 'PAY_VISIT', cellId: cellId! });
+          return gameReducerCore(state, { type: 'PAY_VISIT', cellId: cellId! });
         case 'CHALLENGE':
-          return gameReducer(state, { type: 'START_CHALLENGE', cellId: cellId! });
+          return gameReducerCore(state, { type: 'START_CHALLENGE', cellId: cellId! });
         case 'TAKE_LOAN':
-          return gameReducer(state, { type: 'TAKE_LOAN', amount: parseFloat(args[0]) });
+          return gameReducerCore(state, { type: 'TAKE_LOAN', amount: parseFloat(args[0]) });
         case 'MATCH_INCOME':
           return handleMatchIncome(state, args[0], parseFloat(args[1]), parseInt(args[2]));
         case 'REPAY_LOAN':
-          return gameReducer(state, { type: 'REPAY_LOAN', amount: parseFloat(args[0]) });
+          return gameReducerCore(state, { type: 'REPAY_LOAN', amount: parseFloat(args[0]) });
         case 'DEPOSIT':
-          return gameReducer(state, { type: 'DEPOSIT', amount: parseFloat(args[0]) });
+          return gameReducerCore(state, { type: 'DEPOSIT', amount: parseFloat(args[0]) });
         case 'WITHDRAW':
-          return gameReducer(state, { type: 'WITHDRAW', amount: parseFloat(args[0]) });
+          return gameReducerCore(state, { type: 'WITHDRAW', amount: parseFloat(args[0]) });
         case 'EXECUTE_PAY':
-          return gameReducer(state, { type: 'EXECUTE_PAY', amount: parseFloat(args[0]), ownerId: parseInt(args[1]), reason: args[2] || '' });
+          return gameReducerCore(state, { type: 'EXECUTE_PAY', amount: parseFloat(args[0]), ownerId: parseInt(args[1]), reason: args[2] || '' });
         case 'WINDFALL_GET': {
           const bonus = parseFloat(args[0]) || 3;
           const newPlayers = state.players.map((pl, i) => {
@@ -316,15 +392,15 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           return skipAndEnd(newState);
         }
         case 'DECLINE_LOAN':
-          return gameReducer(state, { type: 'DECLINE_LOAN' });
+          return gameReducerCore(state, { type: 'DECLINE_LOAN' });
         case 'SKIP_BUY':
           return skipAndEnd(state);
         case 'SKIP_UPGRADE':
           return skipAndEnd(state);
         case 'SKIP_VISIT':
-          return gameReducer(state, { type: 'PAY_VISIT', cellId: cellId! });
+          return gameReducerCore(state, { type: 'PAY_VISIT', cellId: cellId! });
         case 'AIRPORT_FLY':
-          return gameReducer(state, { type: 'AIRPORT_FLY', targetCellId: parseInt(args[0]) });
+          return gameReducerCore(state, { type: 'AIRPORT_FLY', targetCellId: parseInt(args[0]) });
         case 'AIRPORT_SKIP':
           return skipAndEnd(state);
         case 'OK':
@@ -334,10 +410,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           }
           return skipAndEnd(state);
         case 'END_TURN':
-          return gameReducer(state, { type: 'END_TURN' });
+          return gameReducerCore(state, { type: 'END_TURN' });
         case 'EXECUTE_BANKRUPT':
-          if (args.length > 0) return gameReducer(state, { type: 'EXECUTE_BANKRUPT_ID', playerId: parseInt(args[0]) });
-          return gameReducer(state, { type: 'EXECUTE_BANKRUPT' });
+          if (args.length > 0) return gameReducerCore(state, { type: 'EXECUTE_BANKRUPT_ID', playerId: parseInt(args[0]) });
+          return gameReducerCore(state, { type: 'EXECUTE_BANKRUPT' });
         case 'PEAK_DUEL_SELECT':
           return startPeakDuelSelect(state);
         case 'PEAK_DUEL_PICK':
@@ -349,17 +425,15 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         case 'YOUTH_DRAW':
           return executeYouthDraw(state);
         case 'RESET':
-          return gameReducer(state, { type: 'RESET_GAME' });
-        case 'CHALLENGER_ROLL':
-          return gameReducer(state, { type: 'CHALLENGER_ROLL', value: rollDice() });
-        case 'OWNER_ROLL':
-          return gameReducer(state, { type: 'OWNER_ROLL', value: rollDice() });
+          return gameReducerCore(state, { type: 'RESET_GAME' });
         case 'PAY_DOUBLE': {
           // 挑战失败，展示支付按钮（保留挑战结果显示）
-          const pCellId = cellId || parseInt(args[0]) || (state.challengeState?.cellId ?? -1);
+          const pCellId = cellId || parseInt(args[0]) || state.challengeState?.cellId;
+          if (pCellId === undefined) return state;
           const pLevel = state.cellLevels[pCellId] || 1;
           const doubleFee = (MATCH_INCOMES[pLevel] || 2) * 2;
           const pOwnerId = state.cellOwners[pCellId];
+          if (pOwnerId === undefined) return state;
 
           return log({
             ...state,
@@ -397,16 +471,17 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         return { ...pl, cash: Math.round((pl.cash - price) * 100) / 100 };
       });
       const newPoolKey = pool === 'food' ? 'foodPool' : 'animalPool';
-      const newState = log({
+      let newState = log({
         ...state,
         players: newPlayers,
         instances: [...state.instances, instance],
         [newPoolKey]: state[newPoolKey].filter(id => id !== cardId),
       }, `⚽ ${p.name} 以 ${price}kw 买下了 ${card.nickname}（${card.name}）！`);
+      newState = pushEvent(newState, state.currentPlayerIndex, '⚽', `${card.name}（OVR ${card.ovr}）`);
 
       // 选择球场分配
       const clubs = getPlayerClubs(p.id, newState.cellOwners, newState.cellLevels, newState.instances);
-      const clubOptions = clubs.map(c => ({
+      const clubOptions = clubs.filter(c => c.count < getClubCapacity(c.level)).map(c => ({
         label: `${c.name}（Lv${c.level}，${c.count}/${getClubCapacity(c.level)}人）`,
         action: `ASSIGN:${uid}:${c.cellId}`,
       }));
@@ -429,6 +504,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     // ===== 分配球员到球场 =====
     case 'ASSIGN_PLAYER': {
       const { instanceUid, clubId } = action;
+      // 检查容量
+      const currentCount = state.instances.filter(i => i.clubId === clubId).length;
+      const capacity = state.cellLevels[clubId] || 1;
+      if (currentCount >= capacity) {
+        return log(state, `❌ 该球场已满（${currentCount}/${capacity}），无法分配！`);
+      }
       const newInstances = state.instances.map(inst => {
         if (inst.uid === instanceUid) return { ...inst, clubId };
         return inst;
@@ -491,21 +572,23 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'BUY_PROPERTY': {
       const cellId = action.cellId;
       const cell = BOARD_CELLS[cellId];
+      const price = cell.price ?? 2;
       const p = currentPlayer(state);
-      if (p.cash < 2) return log(state, `❌ 现金不足，无法购买 ${cell.name}`);
+      if (p.cash < price) return log(state, `❌ 现金不足，无法购买 ${cell.name}`);
 
       const newPlayers = state.players.map((pl, i) => {
         if (i !== state.currentPlayerIndex) return pl;
-        return { ...pl, cash: pl.cash - 2, properties: [...pl.properties, cellId] };
+        return { ...pl, cash: Math.round((pl.cash - price) * 100) / 100, properties: [...pl.properties, cellId] };
       });
 
-      const msg = `🏟️ ${p.name} 以 2kw 买下了 ${cell.name}（社区球场）！`;
-      const newState = log({
+      const msg = `🏟️ ${p.name} 以 ${price}kw 买下了 ${cell.name}（社区球场）！`;
+      let newState = log({
         ...state,
         players: newPlayers,
         cellOwners: { ...state.cellOwners, [cellId]: p.id },
         cellLevels: { ...state.cellLevels, [cellId]: 1 },
       }, msg);
+      newState = pushEvent(newState, state.currentPlayerIndex, '🏟️', cell.name);
 
       return {
         ...newState,
@@ -526,11 +609,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         return { ...pl, cash: Math.round((pl.cash - price) * 100) / 100, properties: [...pl.properties, cellId] };
       });
 
-      const newState = log({
+      let newState = log({
         ...state,
         players: newPlayers,
         cellOwners: { ...state.cellOwners, [cellId]: p.id },
       }, `🏪 ${p.name} 以 ${price}kw 买下了 ${cell.name}！`);
+      newState = pushEvent(newState, state.currentPlayerIndex, '🏪', cell.name);
 
       return skipAndEnd(newState);
     }
@@ -559,6 +643,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         players: newPlayers,
         cellLevels: { ...state.cellLevels, [cellId]: newLevel },
       }, `⬆️ ${p.name} 将 ${cell.name} 升级到 ${levelNames[newLevel]}（可参加${tournamentNames[newLevel]}），花费 ${cost}kw`);
+      newState = pushEvent(newState, state.currentPlayerIndex, '⬆️', `${cell.name} 升至 ${levelNames[newLevel]}`);
+      if (newLevel === 5) newState = pushEvent(newState, state.currentPlayerIndex, '⭐', `${cell.name} 升至现代化球场`);
 
       // Lv3 自动加入驻守球员
       if (newLevel === 3) {
@@ -580,6 +666,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       const level = state.cellLevels[cellId] || 1;
       const fee = getVisitFee(cell, level);
       const ownerId = state.cellOwners[cellId];
+      if (ownerId === undefined) return skipAndEnd(state); // 地主已破产
       const p = currentPlayer(state);
 
       return {
@@ -597,7 +684,9 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'START_CHALLENGE': {
       const cellId = action.cellId;
       const cell = BOARD_CELLS[cellId];
-      const owner = state.players[state.cellOwners[cellId]];
+      const ownerId = state.cellOwners[cellId];
+      if (ownerId === undefined) return skipAndEnd(state); // 地主已破产
+      const owner = state.players[ownerId];
       const p = currentPlayer(state);
       // 检查挑战者是否有球队
       const myClubs = getPlayerClubs(p.id, state.cellOwners, state.cellLevels, state.instances);
@@ -650,7 +739,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
             },
           };
         }
-        return gameReducer(state, { type: 'START_MATCH', homeClubId: cellId, awayClubId: myClub.cellId });
+        return gameReducerCore(state, { type: 'START_MATCH', homeClubId: cellId, awayClubId: myClub.cellId });
       }
       // 多支球队，让玩家选择（仅显示符合条件的）
       const clubOptions: ActionOption[] = eligibleClubs.map(c => ({
@@ -816,7 +905,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         pendingAction: {
           type: 'match_reveal',
           message: `🎲 ${homeCard.name}(${homeVal}) vs ${awayCard.name}(${awayVal}) — ${winner === 'home' ? '主队胜' : winner === 'away' ? '客队胜' : '平局'}！`,
-          options: [{ label: isHumanMatch ? '继续' : '...', action: 'CONFIRM_MATCH_RESULT' }],
+          options: [{ label: isHumanMatch ? '继续' : '继续', action: 'CONFIRM_MATCH_RESULT' }],
         },
       };
     }
@@ -972,15 +1061,25 @@ function finishMatch(state: GameState): GameState {
     leagueTables: newTables,
   }, `🏁 比赛结束！${homeCell.name} ${ms.homeScore}:${ms.awayScore} ${awayCell.name} — ${homeWon ? '主队胜' : '客队胜'}！`);
 
-  // 巅峰对决奖励
+  // 比赛统计
+  newState = addMatch(newState, ms.homePlayerId, homeWon);
+  newState = addMatch(newState, ms.awayPlayerId, !homeWon);
+
+  // 联赛结算检查（巅峰对决也参与联赛积分，需要结算）
+  const tt = newTables[level];
+  if (tt && tt.matchesPlayed >= tt.matchesNeeded) {
+    newState = settleLeague(newState, level);
+  }
+
+  // 巅峰对决奖励（联赛结算后再发）
   if (state.peakDuel) {
     const winnerId = homeWon ? ms.homePlayerId : ms.awayPlayerId;
     const winner = state.players[winnerId];
     const reward = 5;
-    const newPlayers2 = state.players.map((pl, i) => i === winnerId ? { ...pl, cash: Math.round((pl.cash + reward) * 100) / 100 } : pl);
+    const newPlayers2 = newState.players.map((pl, i) => i === winnerId ? { ...pl, cash: Math.round((pl.cash + reward) * 100) / 100 } : pl);
     const duelMsg = `⚔️ 巅峰对决！${winner.name} 获胜，领取 ${reward}kw 奖金！`;
-    newState = log({ ...newState, players: newPlayers2, peakDuel: false }, duelMsg);
-    return { ...newState, pendingAction: { type: 'post_move', message: duelMsg, options: [{ label: `领取 ${reward}kw`, action: 'OK' }] } };
+    const duelState = log({ ...newState, players: newPlayers2, peakDuel: false }, duelMsg);
+    return { ...duelState, pendingAction: { type: 'post_move', message: duelMsg, options: [{ label: `领取 ${reward}kw`, action: 'OK' }], playerId: winnerId } };
   }
 
   // 格式化比分（金球显示括号）
@@ -1004,13 +1103,11 @@ function finishMatch(state: GameState): GameState {
     newState = { ...newState, pendingAction: { type: 'post_move', message: winMsg, options: [{ label: '免费参观', action: 'OK' }] } };
   }
 
-  // 检查联赛结算（pendingAction 已在上方设置，settleLeague 内部会处理）
-  const t = newTables[level];
-  if (t && t.matchesPlayed >= t.matchesNeeded) {
-    return settleLeague(newState, level);
-  }
+  // 联赛结算后检查胜利条件
+  const winCheck = checkWin(newState);
+  if (winCheck.phase === 'finished') return winCheck;
 
-  return newState; // pendingAction 已在 win/lose 分支中设置
+  return newState;
 }
 
 function settleLeague(state: GameState, level: number): GameState {
@@ -1026,9 +1123,10 @@ function settleLeague(state: GameState, level: number): GameState {
   const topPoints = sorted[0]?.points ?? 0;
   if (topPoints <= 0) return skipAndEnd(state); // 没人有分，不结算
   const champions = sorted.filter(e => e.points === topPoints);
-  const newUCL = { ...(newLogState as any).hasUCLTitle || state.hasUCLTitle };
+  const newUCL = { ...state.hasUCLTitle };
   champions.forEach(e => {
-    newTrophies[e.clubId] = (newTrophies[e.clubId] || 0) + 1;
+    const existing = newTrophies[e.clubId] || { total: 0, byLevel: [0, 0, 0, 0, 0, 0] };
+    newTrophies[e.clubId] = { total: existing.total + 1, byLevel: existing.byLevel.map((v, i) => i === level ? v + 1 : v) };
     if (level === 5) newUCL[e.ownerId] = true;
     newPlayers = newPlayers.map(pl => {
       if (pl.id === e.ownerId) return { ...pl, cash: Math.round((pl.cash + prize) * 100) / 100 };
@@ -1037,6 +1135,9 @@ function settleLeague(state: GameState, level: number): GameState {
     const cell = BOARD_CELLS[e.clubId];
     const owner = state.players[e.ownerId];
     newLogState = log(newLogState, `🏆 ${cell?.name ?? '?'}（${owner.name}）获得${LEVEL_TOURNAMENTS[level]}冠军！+${prize}kw奖金 + 奖杯！`);
+    newLogState = addChampionship(newLogState, e.ownerId);
+    const titleIcon = level === 5 ? '👑' : '🏆';
+    newLogState = pushEvent(newLogState, e.ownerId, titleIcon, `${cell?.name ?? '?'} ${LEVEL_TOURNAMENTS[level]}冠军`);
   });
 
   // 亚军：第二高分（如果有且不是并列冠军）
@@ -1082,7 +1183,7 @@ function settleLeague(state: GameState, level: number): GameState {
     pendingAction: {
       type: 'post_move',
       message: combinedMsg,
-      options: [{ label: existingPA?.options[0]?.label || '确定', action: 'OK' }],
+      options: [{ label: existingPA?.options[0]?.label || '确定', action: existingPA?.options[0]?.action || 'OK' }],
     },
   };
 }
@@ -1328,7 +1429,7 @@ function settleLeague(state: GameState, level: number): GameState {
     // ===== 宣告破产 =====
     case 'EXECUTE_BANKRUPT': {
       const p = currentPlayer(state);
-      const newPlayers = state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, isBankrupt: true });
+      const newPlayers = state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, isBankrupt: true, bankruptTurn: state.turn });
       let bankruptState = cleanupBankruptPlayer({ ...state, players: newPlayers, pendingAction: null }, state.currentPlayerIndex);
       bankruptState = log(bankruptState, `💀 ${p.name} 宣告破产！负债 ${p.debt.toFixed(2)}kw，球员回池，地产清空。`);
       const winState = checkWin(bankruptState);
@@ -1340,21 +1441,31 @@ function settleLeague(state: GameState, level: number): GameState {
     case 'EXECUTE_BANKRUPT_ID': {
       const playerId = action.playerId!;
       const bp = state.players[playerId];
-      if (!bp || bp.isBankrupt) return advancePlayer(state);
-      const newPlayers = state.players.map((pl, i) => i !== playerId ? pl : { ...pl, isBankrupt: true });
+      if (!bp || bp.isBankrupt) return state;
+      const newPlayers = state.players.map((pl, i) => i !== playerId ? pl : { ...pl, isBankrupt: true, bankruptTurn: state.turn });
       let bankruptState = cleanupBankruptPlayer({ ...state, players: newPlayers, pendingAction: null }, playerId);
       bankruptState = log(bankruptState, `💀 ${bp.name} 宣告破产！负债 ${bp.debt.toFixed(2)}kw，球员回池，地产清空。`);
       const winState = checkWin(bankruptState);
       if (winState.phase === 'finished') return winState;
-      return advancePlayer(bankruptState);
+      // 将回合还给当前玩家（不跳过）
+      const cp = bankruptState.players[bankruptState.currentPlayerIndex];
+      if (!cp || cp.isBankrupt) return advancePlayer(bankruptState);
+      return {
+        ...bankruptState,
+        pendingAction: {
+          type: 'post_move',
+          message: `${cp.name} 的回合，请掷骰子 🎲`,
+          options: [{ label: '掷骰子', action: 'ROLL_DICE' }],
+        },
+      };
     }
 
     // ===== 结束当前行动（回合末） =====
     case 'END_TURN': {
       const p = currentPlayer(state);
       if (p.debt >= BANKRUPT_DEBT) {
-        const newPlayers = state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, isBankrupt: true });
-        let bankruptState = cleanupBankruptPlayer({ ...state, players: newPlayers }, state.currentPlayerIndex);
+        const newPlayers = state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, isBankrupt: true, bankruptTurn: state.turn });
+        let bankruptState = cleanupBankruptPlayer({ ...state, players: newPlayers, pendingAction: null }, state.currentPlayerIndex);
         bankruptState = log(bankruptState, `💀 ${p.name} 破产了！球员回池，地产清空。`);
         const winState = checkWin(bankruptState);
         if (winState.phase === 'finished') return winState;
@@ -1370,6 +1481,7 @@ function settleLeague(state: GameState, level: number): GameState {
       // 所有玩家回合结束后：存款 +2%，负债 +5%
       let newPlayers = state.players.map(pl => {
         let changes: Partial<typeof pl> = {};
+        if (pl.isBankrupt) return pl; // 破产者跳过利息
         if (pl.debt > 0) {
           const raw = Math.round(pl.debt * (1 + LOAN_RATE) * 100) / 100;
           // 确保每回合至少增长 0.01kw，不被舍掉
@@ -1401,36 +1513,44 @@ function settleLeague(state: GameState, level: number): GameState {
         turn: state.turn + 1,
       }, turnMsg);
 
-      // 检查破产（负债 >= 100kw）
+      // 检查破产（负债 >= 100kw）—— 先捕获快照（含触发破产的高负债），再清理
       const bankruptPlayers = newPlayers.filter(pl => pl.debt >= BANKRUPT_DEBT && !pl.isBankrupt);
       if (bankruptPlayers.length > 0) {
-        // 只处理第一个破产者（需要确认），其余轮到时再处理
-        const bp = bankruptPlayers[0];
-        bankruptPlayers.forEach(b => {
-          newState = log(newState, `💀 ${b.name} 负债超过 ${BANKRUPT_DEBT}kw，破产！`);
-        });
+        // 快照：此时 debt 还是利息后的高值（如 51kw），propertyValue 也还在
+        const snapEntry = { turn: state.turn, players: newPlayers.map(pl => ({
+          cash: pl.cash, savings: pl.savings, debt: pl.debt,
+          propertyValue: pl.isBankrupt ? 0 : getPropertyValue({ ...newState, players: newPlayers }, pl.id),
+        })) };
+        newState = { ...newState, snapshots: [...newState.snapshots, snapEntry] };
+        for (const bp of bankruptPlayers) {
+          newState = log(newState, `💀 ${bp.name} 负债超过 ${BANKRUPT_DEBT}kw，破产！`);
+          newState = cleanupBankruptPlayer(newState, bp.id);
+        }
+        // 标记破产（清理后 debt 已归零，用 ID 匹配而非 debt 条件）
+        const bankruptIds = new Set(bankruptPlayers.map(b => b.id));
         newPlayers = newState.players.map(pl => {
-          if (pl.debt >= BANKRUPT_DEBT) return { ...pl, isBankrupt: true };
+          if (bankruptIds.has(pl.id)) return { ...pl, isBankrupt: true, bankruptTurn: state.turn };
           return pl;
         });
         newState = { ...newState, players: newPlayers };
 
-        // 如果游戏还没结束，给破产者确认提示
+        // 游戏未结束 → 直接推进到下一个存活玩家（不走"确定→结束回合"多余循环）
         const winCheck = checkWin({ ...newState, players: newPlayers });
         if (winCheck.phase === 'finished') return winCheck;
 
+        const nextIdx = findNextAlivePlayer(newState.players, newState.currentPlayerIndex);
+        const nextP = newState.players[nextIdx];
+        const inJail = nextP.jailTurns > 0;
         return {
           ...newState,
+          currentPlayerIndex: nextIdx,
           pendingAction: {
             type: 'post_move',
-            message: `💀 ${bp.name} 负债达到 ${bp.debt.toFixed(2)}kw（上限 ${BANKRUPT_DEBT}kw），必须退出足坛！`,
-            options: [{ label: '宣告破产', action: `EXECUTE_BANKRUPT:${bp.id}` }],
+            message: inJail ? `💀 ${bankruptPlayers.map(b => b.name).join('、')} 破产！🔒 ${nextP.name} 坐牢中，剩余 ${nextP.jailTurns} 轮`
+                           : `💀 ${bankruptPlayers.map(b => b.name).join('、')} 破产！轮到 ${nextP.name}`,
+            options: [{ label: inJail ? '结束回合' : '掷骰子', action: inJail ? 'END_TURN' : 'ROLL_DICE' }],
           },
         };
-
-        // 检查胜利
-        const bkWinState = checkWin(newState);
-        if (bkWinState.phase === 'finished') return bkWinState;
       }
 
       // 检查净值胜利
@@ -1442,9 +1562,15 @@ function settleLeague(state: GameState, level: number): GameState {
       const nextPlayer = newState.players[nextPlayerIdx];
       const isInJail = nextPlayer.jailTurns > 0;
 
+      // 财务快照
+      const snapEntry = { turn: state.turn, players: newPlayers.map(pl => ({
+        cash: pl.cash, savings: pl.savings, debt: pl.debt,
+        propertyValue: pl.isBankrupt ? 0 : getPropertyValue({ ...newState, players: newPlayers }, pl.id),
+      })) };
       return {
         ...newState,
         currentPlayerIndex: nextPlayerIdx,
+        snapshots: [...newState.snapshots, snapEntry],
         pendingAction: {
           type: 'post_move',
           message: isInJail ? `🔒 ${nextPlayer.name} 坐牢中，剩余 ${nextPlayer.jailTurns} 轮` : `${nextPlayer.name} 的回合，请掷骰子 🎲`,
@@ -1519,13 +1645,14 @@ function handleLanding(state: GameState, position: number): GameState {
 
       if (ownerId === undefined) {
         // 无人持有 → 可以购买
+        const clubPrice = cell.price ?? 2;
         return {
           ...state,
           pendingAction: {
             type: 'buy_club',
-            message: `${cell.name} 无人所有，是否以 2kw 购买？（${cell.league}俱乐部）`,
+            message: `${cell.name} 无人所有，是否以 ${clubPrice}kw 购买？（${cell.league}俱乐部）`,
             options: [
-              { label: '购买 (2kw)', action: `BUY_CLUB:${position}`, disabled: p.cash < 2 },
+              { label: `购买 (${clubPrice}kw)`, action: `BUY_CLUB:${position}`, disabled: p.cash < clubPrice },
               { label: '不买', action: 'SKIP_BUY' },
             ],
             cellId: position,
@@ -1644,10 +1771,12 @@ function handleLanding(state: GameState, position: number): GameState {
         if (i !== state.currentPlayerIndex) return pl;
         return { ...pl, jailTurns: 2 };
       });
-      const newState = log({
+      let newState = log({
         ...state,
         players: newPlayers,
       }, `🔒 ${p.name} 被关进监狱！需要停留 2 回合。`);
+      newState = addJail(newState, state.currentPlayerIndex);
+      newState = pushEvent(newState, state.currentPlayerIndex, '🔒', '');
       return skipAndEnd(newState);
     }
 
@@ -1783,23 +1912,6 @@ function handleRandomEvent(state: GameState, position: number): GameState {
       }
       return { ...state, pendingAction: { type: "post_move", message: `🎲 随机事件：球场漏水！${BOARD_CELLS[targetClub].name} 从 Lv${currentLevel} 降级到 Lv${currentLevel - 1}。`, options: [{ label: "知道了", action: `RND_EVT:3:downgrade:${targetClub}` }] } };
     }
-    case 4: { // 财政公平
-      const alive = state.players.filter(pl => !pl.isBankrupt);
-      const richest = alive.reduce((a, b) => a.cash > b.cash ? a : b);
-      const poorest = alive.reduce((a, b) => a.cash < b.cash ? a : b);
-      if (richest.id === poorest.id || richest.cash <= poorest.cash) {
-        return { ...state, pendingAction: { type: "post_move", message: "🎲 随机事件：财政公平！贫富差距不大，无事发生。", options: [{ label: "知道了", action: "OK" }] } };
-      }
-      const diff = Math.round((richest.cash - poorest.cash) * 100) / 100;
-      const transfer = Math.round(diff / 4 * 100) / 100;
-      if (transfer <= 0) {
-        return { ...state, pendingAction: { type: "post_move", message: "🎲 随机事件：财政公平！差额太小，无事发生。", options: [{ label: "知道了", action: "OK" }] } };
-      }
-      let btnLabel = "知道了";
-      if (p.id === richest.id) btnLabel = `支付 ${transfer}kw`;
-      else if (p.id === poorest.id) btnLabel = `领取 ${transfer}kw`;
-      return { ...state, pendingAction: { type: "post_move", message: `🎲 随机事件：财政公平！${richest.name} 支付 ${transfer}kw 给 ${poorest.name}。`, options: [{ label: btnLabel, action: `RND_EVT:4:${transfer}:${richest.id}:${poorest.id}` }] } };
-    }
     case 5: { // 燃放焰火
       const clubCount = p.properties.filter(id => BOARD_CELLS[id].type === "club").length;
       if (clubCount === 0) {
@@ -1884,7 +1996,25 @@ function startPeakDuelWithClub(state: GameState, opponentId: number, myClubId: n
     label: `${c.name}（Lv${c.level}，${c.count}名球员）`,
     action: `START_MATCH:${c.cellId}:${myClubId}`,
   }));
-  return { ...state, peakDuel: true, pendingAction: { type: 'match_setup', message: `⚔️ ${p.name} vs ${opp.name} — 选择${opp.name}的球队：`, options: opts } };
+  return { ...state, peakDuel: true, pendingAction: { type: 'match_setup', message: `⚔️ ${p.name} vs ${opp.name} — 选择${opp.name}的球队：`, options: opts, playerId: opponentId } };
+}
+
+function applyStadiumDowngrade(state: GameState, cid: number): GameState {
+  const nl = (state.cellLevels[cid] || 1) - 1;
+  // 总人数（驻守+普通）不得超过等级容量
+  const totalPlayers = state.instances.filter(i => i.clubId === cid).length;
+  const overflow = totalPlayers - nl;
+  if (overflow > 0) return startStadiumOverflowFlow(state, cid, nl);
+  let s = { ...state, cellLevels: { ...state.cellLevels, [cid]: nl } };
+  if (nl < 3) {
+    const residentInst = s.instances.find(i => getCard(i.cardId)?.isResident && getCard(i.cardId)?.residentClubId === cid && i.clubId === cid);
+    if (residentInst) {
+      s = { ...s, instances: s.instances.filter(i => i.uid !== residentInst.uid) };
+      s = log(s, `🔙 ${getCard(residentInst.cardId)?.name ?? '?'} 离开球队（球场降至Lv2）。`);
+    }
+  }
+  const result = log(s, `🎲 ${BOARD_CELLS[cid].name} 降级到 Lv${nl}。`);
+  return { ...result, pendingAction: { type: 'post_move', message: `🎲 ${BOARD_CELLS[cid].name} 降级到 Lv${nl}。`, options: [{ label: '知道了', action: 'OK' }] } };
 }
 
 // ========== 球场失去处理 ==========
@@ -1898,7 +2028,13 @@ function prepareStadiumLoss(state: GameState, cid: number): GameState {
     if (inst.clubId !== cid) return true;
     return getCard(inst.cardId)?.isResident ? false : true; // 驻守直接移除
   });
-  return { ...state, players: np, cellOwners: no, cellLevels: nl, instances: newInstances };
+  // 清除该球场的奖杯和联赛战绩（否则重新购买后会继承）
+  const newTrophies = { ...state.clubTrophies }; delete newTrophies[cid];
+  const newTables = state.leagueTables.map(t => ({
+    ...t,
+    entries: (t.entries || []).filter(e => e.clubId !== cid),
+  }));
+  return { ...state, players: np, cellOwners: no, cellLevels: nl, instances: newInstances, clubTrophies: newTrophies, leagueTables: newTables };
 }
 
 function buildLossTransferUI(state: GameState, lostCid: number): PendingAction {
@@ -1938,8 +2074,8 @@ function startStadiumLossFlow(state: GameState, cid: number): GameState {
 }
 
 function startStadiumOverflowFlow(state: GameState, cid: number, newLevel: number): GameState {
-  // 如果是降到 Lv2，先移除驻守球员
-  let s = state;
+  // 应用降级
+  let s = { ...state, cellLevels: { ...state.cellLevels, [cid]: newLevel } };
   if (newLevel < 3) {
     const residentInst = s.instances.find(i => {
       const card = getCard(i.cardId);
@@ -1950,29 +2086,33 @@ function startStadiumOverflowFlow(state: GameState, cid: number, newLevel: numbe
       s = log(s, `🔙 ${getCard(residentInst.cardId)?.name ?? '?'} 离开球队（球场降至Lv2）。`);
     }
   }
-  const overflow = s.instances.filter(i => i.clubId === cid && !getCard(i.cardId)?.isResident);
-  if (overflow.length <= newLevel) {
-    // 无需处理溢出
+  // 驻守球员是否还存在（newLevel≥3 时保留）
+  const hasResident = s.instances.some(i => {
+    const card = getCard(i.cardId);
+    return card?.isResident && card.residentClubId === cid && i.clubId === cid;
+  });
+  const remainingN = s.instances.filter(i => i.clubId === cid && !getCard(i.cardId)?.isResident);
+  // 总人数 = 驻守(0或1) + 普通球员
+  const totalRemaining = remainingN.length + (hasResident ? 1 : 0);
+  if (totalRemaining <= newLevel) {
     const msg = `🎲 ${BOARD_CELLS[cid].name} 降级到 Lv${newLevel}。`;
     return { ...s, pendingAction: { type: 'post_move', message: msg, options: [{ label: '确定', action: 'OK' }] } };
   }
-  // 选出第一个需要处理的非驻守球员
-  const opts: ActionOption[] = overflow.map(inst => {
+  // 需要处理的普通球员数
+  const needToRelease = totalRemaining - newLevel;
+  const opts: ActionOption[] = remainingN.map(inst => {
     const card = getCard(inst.cardId);
-    const otherClubs = getPlayerClubs(state.currentPlayerIndex, state.cellOwners, state.cellLevels, state.instances).filter(c => c.cellId !== cid && c.count < getClubCapacity(c.level));
-    const hasOtherSpace = otherClubs.length > 0;
     return {
       label: `${card?.name ?? '?'} — 选择转会或释放`,
-      action: `OVERFLOW_SELECT:${inst.uid}:${cid}:${newLevel}:${overflow.length - 1}`,
+      action: `OVERFLOW_SELECT:${inst.uid}:${cid}:${newLevel}:${remainingN.length - 1}`,
       disabled: false,
     };
   });
   return {
-    ...state,
-    cellLevels: { ...state.cellLevels, [cid]: newLevel },
+    ...s,
     pendingAction: {
       type: 'internal_transfer',
-      message: `🎲 ${BOARD_CELLS[cid].name} 降级到 Lv${newLevel}！需释放 ${overflow.length - newLevel} 名球员，请选择要处理的球员：`,
+      message: `🎲 ${BOARD_CELLS[cid].name} 降级到 Lv${newLevel}！需释放 ${needToRelease} 名球员，请选择要处理的球员：`,
       options: opts,
     },
   };
@@ -2030,7 +2170,7 @@ function handleOverflowTransfer(state: GameState, uid: string, targetCid: number
   if (remaining <= 0) {
     return { ...newState, pendingAction: { type: 'post_move', message: `✅ 降级处理完成，球员已安置。`, options: [{ label: '确定', action: 'OK' }] } };
   }
-  return { ...newState, pendingAction: { ...startStadiumOverflowFlow(newState, fromCid, state.cellLevels[fromCid] || 1).pendingAction! } };
+  return startStadiumOverflowFlow(newState, fromCid, state.cellLevels[fromCid] || 1);
 }
 
 function handleOverflowRelease(state: GameState, uid: string, fromCid: number, remaining: number): GameState {
@@ -2043,7 +2183,7 @@ function handleOverflowRelease(state: GameState, uid: string, fromCid: number, r
   if (remaining <= 0) {
     return { ...newState, pendingAction: { type: 'post_move', message: `✅ 降级处理完成，球员已安置。`, options: [{ label: '确定', action: 'OK' }] } };
   }
-  return { ...newState, pendingAction: { ...startStadiumOverflowFlow(newState, fromCid, state.cellLevels[fromCid] || 1).pendingAction! } };
+  return startStadiumOverflowFlow(newState, fromCid, state.cellLevels[fromCid] || 1);
 }
 
 // ========== 比赛日收入分配 ==========
@@ -2081,7 +2221,7 @@ function handleMatchIncome(state: GameState, choice: string, amount: number, cel
         type: 'upgrade',
         message: `是否升级 ${cell.name}？${levelNames[level]} → ${levelNames[level+1]}（可参加${tol[level+1]}），需要 ${nextCost}kw`,
         options: [
-          { label: `升级 (${nextCost}kw)`, action: `UPGRADE:${cellId}`, disabled: p.cash < nextCost },
+          { label: `升级 (${nextCost}kw)`, action: `UPGRADE:${cellId}`, disabled: newPlayers[state.currentPlayerIndex].cash < nextCost },
           { label: '暂不升级', action: 'SKIP_UPGRADE' },
         ],
         cellId,
@@ -2133,12 +2273,13 @@ function executeYouthDraw(state: GameState): GameState {
   const uid = `${cardId}_${Date.now()}`;
   const instance = { uid, cardId, ownerId: p.id, clubId: -1, growth: [0,0,0,0,0,0] };
   const newPlayers = state.players.map((pl, i) => i !== state.currentPlayerIndex ? pl : { ...pl, cash: Math.round((pl.cash - 5) * 100) / 100 });
-  const newState = log({
+  let newState = log({
     ...state,
     players: newPlayers,
     instances: [...state.instances, instance],
     youthPool: state.youthPool.filter(id => id !== cardId),
   }, `🎓 ${p.name} 从青训学院签下 ${card.name}！（OVR ${card.ovr}）`);
+  newState = pushEvent(newState, state.currentPlayerIndex, '⚽', `${card.name}（OVR ${card.ovr}）`);
   // 选球场
   const clubs = getPlayerClubs(p.id, newState.cellOwners, newState.cellLevels, newState.instances);
   const opts = clubs.filter(c => c.count < getClubCapacity(c.level)).map(c => ({
@@ -2194,15 +2335,16 @@ function executeTrainAttr(state: GameState, uid: string): GameState {
   const newTP = { ...state.trainingPoints, [p.id]: tp - 1 };
   const newInst = newInstances.find(i => i.uid === uid)!;
   const newOVR = getEffectiveOVR(newInst);
-  const newState = log({ ...state, instances: newInstances, trainingPoints: newTP }, `🏋️ ${p.name} 训练了 ${card?.name ?? '?'}，全维度 +1（OVR ${currentOVR}→${newOVR}）！剩余训练点：${tp - 1}`);
+  let trainState = log({ ...state, instances: newInstances, trainingPoints: newTP }, `🏋️ ${p.name} 训练了 ${card?.name ?? '?'}，全维度 +1（OVR ${currentOVR}→${newOVR}）！剩余训练点：${tp - 1}`);
+  trainState = pushEvent(trainState, state.currentPlayerIndex, '🏋️', `${card?.name ?? '?'}（OVR ${currentOVR}→${newOVR}）`);
   // 仍有训练点且还有可训练球员 → 继续；否则结束
   if (tp - 1 > 0) {
     const trainable = newInstances.filter(i => i.ownerId === p.id && getEffectiveOVR(i) < 100);
     if (trainable.length > 0) {
-      return { ...newState, pendingAction: { type: 'loan', message: `🏋️ 训练完成！剩余训练点：${tp - 1}。选择下一位球员：`, options: buildTrainOptions(newState, p), cellId: 29 } };
+      return { ...trainState, pendingAction: { type: 'loan', message: `🏋️ 训练完成！剩余训练点：${tp - 1}。选择下一位球员：`, options: buildTrainOptions(trainState, p), cellId: 29 } };
     }
   }
-  return skipAndEnd(newState);
+  return skipAndEnd(trainState);
 }
 
 function buildTrainOptions(state: GameState, p: GameState['players'][0]): ActionOption[] {
@@ -2288,15 +2430,15 @@ function getBidOptions(bidder: GameState['players'][0], basePrice: number, curre
   opts.push({ label: '不跟价', action: 'PASS_BID' }); return opts;
 }
 
-function findNextBidder(tbs: NonNullable<GameState['transferBidState']>): number {
+function findNextBidder(tbs: NonNullable<GameState['transferBidState']>, players: GameState['players']): number {
   const n = tbs.bidders.length;
-  for (let i = 1; i <= n; i++) { const idx = (tbs.bidderIndex + i) % n; if (!tbs.passedPlayers.includes(tbs.bidders[idx])) return idx; }
+  for (let i = 1; i <= n; i++) { const idx = (tbs.bidderIndex + i) % n; const bid = tbs.bidders[idx]; if (!tbs.passedPlayers.includes(bid) && !players[bid]?.isBankrupt) return idx; }
   return -1;
 }
 
 function advanceBid(state: GameState, tbs: GameState['transferBidState']): GameState {
   if (!tbs) return state;
-  const nextIdx = findNextBidder(tbs);
+  const nextIdx = findNextBidder(tbs, state.players);
   if (nextIdx === -1) { if (tbs.currentBid !== null && tbs.currentBidderId !== null) return finalizeTransferBid(state, tbs, tbs.currentBid, tbs.currentBidderId); return cancelTransferBid(state, tbs); }
   const bidderId = tbs.bidders[nextIdx]; const card = getCard(tbs.cardId);
   const basePrice = tbs.isSell ? Math.round((card?.marketValue ?? 0) / 4 * 100) / 100 : Math.round((card?.marketValue ?? 0) / 2 * 100) / 100;
@@ -2313,13 +2455,15 @@ function finalizeTransferBid(state: GameState, tbs: NonNullable<GameState['trans
   const uid = `${tbs.cardId}_${Date.now()}`; const instance = { uid, cardId: tbs.cardId, ownerId: winnerId, clubId: -1, growth: [0,0,0,0,0,0] };
   if (tbs.isSell && tbs.sellerId !== undefined) {
     const newPlayers = state.players.map((pl, i) => { if (i === winnerId) return { ...pl, cash: Math.round((pl.cash - amount) * 100) / 100 }; if (i === tbs.sellerId) return { ...pl, cash: Math.round((pl.cash + amount) * 100) / 100 }; return pl; });
-    const ns = log({ ...state, players: newPlayers, instances: state.instances.filter(i => i.uid !== tbs.instanceUid), transferBidState: null }, `🤝 ${bidder.name} 以 ${amount}kw 竞得 ${card.name}！`);
-    const clubOpts = clubs.map(c => ({ label: `${c.name}（Lv${c.level}，${c.count}/${getClubCapacity(c.level)}人）`, action: `ASSIGN:${uid}:${c.cellId}` }));
+    let ns = log({ ...state, players: newPlayers, instances: state.instances.filter(i => i.uid !== tbs.instanceUid), transferBidState: null }, `🤝 ${bidder.name} 以 ${amount}kw 竞得 ${card.name}！`);
+    ns = pushEvent(ns, winnerId, '⚽', `${card.name}（OVR ${card.ovr}）`);
+    const clubOpts = clubs.filter(c => c.count < getClubCapacity(c.level)).map(c => ({ label: `${c.name}（Lv${c.level}，${c.count}/${getClubCapacity(c.level)}人）`, action: `ASSIGN:${uid}:${c.cellId}` }));
     return { ...ns, instances: [...ns.instances, instance], pendingAction: { type: 'assign_player', message: `${bidder.name} 竞得 ${card.name}！请选择分配的球场：`, options: clubOpts, instanceUid: uid } };
   }
   const newPlayers = state.players.map((pl, i) => i === winnerId ? { ...pl, cash: Math.round((pl.cash - amount) * 100) / 100 } : pl);
-  const ns = log({ ...state, players: newPlayers, transferPool: state.transferPool.filter(id => id !== tbs.cardId), transferBidState: null }, `🤝 ${bidder.name} 以 ${amount}kw 竞得 ${card.name}！`);
-  const clubOpts = clubs.map(c => ({ label: `${c.name}（Lv${c.level}，${c.count}/${getClubCapacity(c.level)}人）`, action: `ASSIGN:${uid}:${c.cellId}` }));
+  let ns = log({ ...state, players: newPlayers, transferPool: state.transferPool.filter(id => id !== tbs.cardId), transferBidState: null }, `🤝 ${bidder.name} 以 ${amount}kw 竞得 ${card.name}！`);
+  ns = pushEvent(ns, winnerId, '⚽', `${card.name}（OVR ${card.ovr}）`);
+  const clubOpts = clubs.filter(c => c.count < getClubCapacity(c.level)).map(c => ({ label: `${c.name}（Lv${c.level}，${c.count}/${getClubCapacity(c.level)}人）`, action: `ASSIGN:${uid}:${c.cellId}` }));
   return { ...ns, instances: [...ns.instances, instance], pendingAction: { type: 'assign_player', message: `${bidder.name} 竞得 ${card.name}！请选择分配的球场：`, options: clubOpts, instanceUid: uid } };
 }
 
@@ -2366,28 +2510,85 @@ function handleTransferLanding(state: GameState, position: number): GameState {
 
 // ========== 破产清理 ==========
 function cleanupBankruptPlayer(state: GameState, playerId: number): GameState {
-  const bp = state.players[playerId];
-  // 球员回原池
-  let newInstances = [...state.instances];
-  bp.properties.forEach(cid => {
-    const clubInstances = newInstances.filter(i => i.clubId === cid && i.ownerId === playerId);
-    clubInstances.forEach(inst => {
+  // 捕获破产前快照（含触发破产的高负债；若调用方已捕获则产生同轮重复，report 端会去重）
+  const preSnap = { turn: state.turn, players: state.players.map(pl => ({
+    cash: pl.cash, savings: pl.savings, debt: pl.debt,
+    propertyValue: getPropertyValue(state, pl.id), // 破产玩家也要记录真实资产，而非 0
+  })) };
+  const withSnap = state.snapshots.length === 0 || state.snapshots[state.snapshots.length - 1].turn !== state.turn
+    ? { ...state, snapshots: [...state.snapshots, preSnap] } : state;
+
+  // 记录最强球队（清理前）
+  const myClubs = Object.keys(withSnap.cellOwners).filter(cid => withSnap.cellOwners[+cid] === playerId).map(cid => parseInt(cid));
+  let bestOvrSum = -1;
+  let bestTeamData: GameState['bankruptTeams'][0] | null = null;
+  for (const cid of myClubs) {
+    const squad = withSnap.instances.filter(i => i.clubId === cid);
+    if (squad.length === 0) continue;
+    let ovrSum = 0;
+    const pls: { name: string; ovr: number }[] = [];
+    for (const inst of squad) {
       const card = getCard(inst.cardId);
-      if (card?.isResident) return; // 驻守球员不回池
-      const pool = idToPool(inst.cardId) || 'transfer';
-      const poolKey = pool === 'food' ? 'foodPool' : pool === 'animal' ? 'animalPool' : 'transferPool';
-      state = { ...state, [poolKey]: [...state[poolKey], inst.cardId] };
-    });
-    newInstances = newInstances.filter(i => !(i.clubId === cid && i.ownerId === playerId));
+      if (!card) continue;
+      const ovr = card.isGK ? card.ovr + (inst.growth[0] || 0) : card.ovr + Math.floor(inst.growth.reduce((a: number, b: number) => a + b, 0) / 6);
+      ovrSum += ovr;
+      pls.push({ name: card.name, ovr });
+    }
+    if (ovrSum > bestOvrSum) {
+      bestOvrSum = ovrSum;
+      const tr = withSnap.clubTrophies[cid];
+      const byLevel = tr?.byLevel || [0,0,0,0,0,0];
+      bestTeamData = {
+        name: BOARD_CELLS[cid]?.name ?? '?',
+        avgOvr: Math.round((ovrSum / squad.length) * 10) / 10,
+        players: pls,
+        leagueTitles: byLevel[1] || 0, cupTitles: byLevel[2] || 0,
+        eclTitles: byLevel[3] || 0, uelTitles: byLevel[4] || 0, uclTitles: byLevel[5] || 0,
+      };
+    }
+  }
+
+  // 球员回池
+  const myInstances = withSnap.instances.filter(i => i.ownerId === playerId);
+  let newPools = { foodPool: [...withSnap.foodPool], animalPool: [...withSnap.animalPool], transferPool: [...withSnap.transferPool] };
+  myInstances.forEach(inst => {
+    const card = getCard(inst.cardId);
+    if (card?.isResident) return;
+    const pool = idToPool(inst.cardId) || 'transfer';
+    const pk = (pool === 'food' ? 'foodPool' : pool === 'animal' ? 'animalPool' : 'transferPool') as 'foodPool' | 'animalPool' | 'transferPool';
+    newPools[pk] = [...newPools[pk], inst.cardId];
   });
-  // 清空地产
-  const newOwners = { ...state.cellOwners };
-  const newLevels = { ...state.cellLevels };
-  bp.properties.forEach(cid => {
-    delete newOwners[cid];
-    delete newLevels[cid];
-  });
-  return { ...state, instances: newInstances, cellOwners: newOwners, cellLevels: newLevels };
+  const newInstances = withSnap.instances.filter(i => i.ownerId !== playerId);
+  // 清除地产
+  const newOwners: Record<number, number> = {};
+  const newLevels: Record<number, number> = {};
+  const newTrophies = { ...withSnap.clubTrophies };
+  for (const cid of Object.keys(withSnap.cellOwners)) {
+    if (withSnap.cellOwners[+cid] !== playerId) {
+      newOwners[+cid] = withSnap.cellOwners[+cid];
+      newLevels[+cid] = withSnap.cellLevels[+cid];
+    } else {
+      delete newTrophies[+cid]; // 清除奖杯，新买家不会继承
+    }
+  }
+  const newPlayers = withSnap.players.map((pl, i) => i !== playerId ? pl : { ...pl, properties: [], cash: 0, savings: 0, debt: 0 });
+  const newTables = withSnap.leagueTables.map(t => ({
+    ...t,
+    entries: (t.entries || []).filter(e => e.ownerId !== playerId),
+  }));
+  const newTP = { ...withSnap.trainingPoints }; delete newTP[playerId];
+  const newUCL = { ...withSnap.hasUCLTitle }; delete newUCL[playerId];
+  const clearTransfer = withSnap.transferBidState && (
+    withSnap.transferBidState.bidders.includes(playerId) ||
+    withSnap.transferBidState.currentBidderId === playerId ||
+    withSnap.transferBidState.sellerId === playerId
+  ) ? null : withSnap.transferBidState;
+  const clearMatch = withSnap.matchState && (
+    withSnap.matchState.homePlayerId === playerId || withSnap.matchState.awayPlayerId === playerId
+  ) ? null : withSnap.matchState;
+  const newBankruptTeams = { ...withSnap.bankruptTeams };
+  if (bestTeamData) newBankruptTeams[playerId] = bestTeamData;
+  return { ...withSnap, players: newPlayers, instances: newInstances, cellOwners: newOwners, cellLevels: newLevels, clubTrophies: newTrophies, ...newPools, leagueTables: newTables, trainingPoints: newTP, hasUCLTitle: newUCL, transferBidState: clearTransfer, matchState: clearMatch, bankruptTeams: newBankruptTeams };
 }
 
 function skipAndEnd(state: GameState): GameState {
@@ -2496,4 +2697,45 @@ function findNextAlivePlayer(players: GameState['players'], startIdx: number): n
     if (!players[idx].isBankrupt) return idx;
   }
   return startIdx;
+}
+
+// ========== 导出的 Reducer（带统计追踪） ==========
+export function gameReducer(state: GameState, action: GameAction): GameState {
+  // 跳过不影响现金的 action
+  if (action.type === 'START_DICE_ANIMATION' || action.type === 'CONFIRM_MATCH_RESULT' ||
+      action.type === 'ROLL_MATCH_DICE' || action.type === 'PICK_MATCH_PLAYER' ||
+      action.type === 'DEPOSIT' || action.type === 'WITHDRAW' ||
+      action.type === 'TAKE_LOAN' || action.type === 'REPAY_LOAN' ||
+      action.type === 'LOAD_GAME' || action.type === 'RESET_GAME' || action.type === 'START_GAME') {
+    return gameReducerCore(state, action);
+  }
+  const oldPlayers = state.players;
+  const newState = gameReducerCore(state, action);
+  const newPlayers = newState.players;
+  // Diff 现金变化 → 自动归类收入/支出
+  let tracked = newState;
+  for (let i = 0; i < oldPlayers.length; i++) {
+    // 跳过破产导致的清零（资产清算不算消费）
+    if (newPlayers[i]?.isBankrupt) continue;
+    const oldCash = oldPlayers[i]?.cash ?? 0;
+    const newCash = newPlayers[i]?.cash ?? 0;
+    const delta = Math.round((newCash - oldCash) * 100) / 100;
+    if (delta > 0) tracked = addIncome(tracked, i, delta);
+    else if (delta < 0) tracked = addSpending(tracked, i, -delta);
+  }
+  // 游戏结束/破产时捕获最终快照（不再走 ROUND_SETTLEMENT）
+  if (tracked.phase === 'finished' && state.phase !== 'finished') {
+    const finalPlayers = tracked.players;
+    tracked = {
+      ...tracked,
+      snapshots: [...tracked.snapshots, {
+        turn: tracked.turn,
+        players: finalPlayers.map(pl => ({
+          cash: pl.cash, savings: pl.savings, debt: pl.debt,
+          propertyValue: pl.isBankrupt ? 0 : getPropertyValue({ ...tracked, players: finalPlayers }, pl.id),
+        })),
+      }],
+    };
+  }
+  return tracked;
 }

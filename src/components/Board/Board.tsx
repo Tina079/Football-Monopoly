@@ -23,6 +23,7 @@ export default function Board() {
   // 按格分组玩家
   const playersByCell: Record<number, typeof players> = {};
   players.forEach(p => {
+    if (p.isBankrupt) return;
     if (!playersByCell[p.position]) playersByCell[p.position] = [];
     playersByCell[p.position].push(p);
   });
@@ -52,7 +53,7 @@ export default function Board() {
                     }
                     level={state.cellLevels[cellId]}
                     playerCount={instances.filter(i => i.clubId === cellId).length}
-                    trophyCount={clubTrophies[cellId] || 0}
+                    trophyCount={clubTrophies[cellId]?.total || 0}
                   />
                   {playersByCell[cellId] && (
                     <div className={styles.tokens}>

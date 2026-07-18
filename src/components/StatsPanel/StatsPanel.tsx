@@ -1,18 +1,32 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useGame } from '../../state/GameContext';
 import { fmtMoney, calcCapital, calcAssets, WIN_CAPITAL, BANKRUPT_DEBT } from '../../utils/gameLogic';
 import { ALL_PLAYERS } from '../../data/players';
+import PostGameReport from '../PostGameReport/PostGameReport';
 import styles from './StatsPanel.module.css';
 
 export default function StatsPanel() {
   const { state } = useGame();
   const { players, currentPlayerIndex, log, cellLevels, instances, clubTrophies, trainingPoints } = state;
+  const [reportPid, setReportPid] = useState<number | null>(null);
 
-  return (
+  return (<>
     <div className={styles.panel}>
       <div className={styles.section}>
         <h3 className={styles.heading}>📊 玩家资产</h3>
         {players.map((p, i) => {
+          if (p.isBankrupt) {
+            return (
+              <div key={p.id} className={`${styles.playerCard} ${styles.bankrupt}`}>
+                <div className={styles.playerHeader}>
+                  <span className={styles.dot} style={{ backgroundColor: p.color, opacity: 0.3 }} />
+                  <span className={styles.playerName} style={{ opacity: 0.5 }}>{p.name}</span>
+                  <span className={styles.badgeBankrupt}>💀 第{p.bankruptTurn || state.turn}轮破产</span>
+                  <button className={styles.reportMiniBtn} onClick={(e) => { e.stopPropagation(); setReportPid(p.id); }}>报告</button>
+                </div>
+              </div>
+            );
+          }
           const capital = calcCapital(p.cash, p.savings, p.debt);
           const assets = calcAssets(p.properties, cellLevels, state.cells);
           const isCurrent = i === currentPlayerIndex && !p.isBankrupt;
@@ -120,7 +134,7 @@ export default function StatsPanel() {
                   const isSponsor = cell.type === 'sponsor';
                   const level = cellLevels[cid];
                   const clubPlayers = instances.filter(inst => inst.clubId === cid);
-                  const trophyCount = clubTrophies[cid] || 0;
+                  const trophyCount = clubTrophies[cid]?.total || 0;
                   return (
                     <span key={cid} className={styles.propertyTag} style={{ borderColor: p.color }}>
                       {cell.name}{!isSponsor && level ? ` Lv${level}` : ''}
@@ -189,5 +203,7 @@ export default function StatsPanel() {
         </div>
       </div>
     </div>
+    {reportPid !== null && <PostGameReport state={state} playerId={reportPid} onClose={() => setReportPid(null)} />}
+  </>
   );
 }

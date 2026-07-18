@@ -60,6 +60,7 @@ export interface Player {
   properties: number[];
   jailTurns: number;
   isBankrupt: boolean;
+  bankruptTurn: number;     // 破产发生的轮次
   isAI: boolean;           // NPC 人机
 }
 
@@ -70,6 +71,24 @@ export interface PlayerInstance {
   ownerId: number;      // 所属玩家
   clubId: number;       // 所属球场 cellId
   growth: number[];     // 6 维历练增量 [0,0,0,0,0,0]
+}
+
+// ========== 赛后报告数据 ==========
+export interface ClubTrophy {
+  total: number;
+  byLevel: number[];   // index 1-5 对应联赛等级
+}
+export interface TurnSnapshot {
+  turn: number;
+  players: { cash: number; savings: number; debt: number; propertyValue: number }[];
+}
+export interface PlayerStats {
+  totalIncome: number; totalSpent: number;
+  jailCount: number; matchesPlayed: number; matchesWon: number;
+  championships: number;
+}
+export interface GameEvent {
+  turn: number; playerId: number; icon: string; text: string;
 }
 
 // ========== 对战回合 ==========
@@ -104,7 +123,6 @@ export interface MatchState {
   diceValue: number | null;
   rounds: MatchRound[];
   isGoldenGoal: boolean;
-  isPeakDuel?: boolean;     // 巅峰对决
   homeUsed: string[];                     // 已出场 uid
   awayUsed: string[];                     // 已出场 uid
 }
@@ -173,8 +191,14 @@ export interface GameState {
   trainingPoints: Record<number, number>;  // playerId → points
 
   // 奖杯
-  clubTrophies: Record<number, number>;    // clubId → count
-  hasUCLTitle: Record<number, boolean>;   // playerId → 是否拿过欧冠
+  clubTrophies: Record<number, ClubTrophy>;   // clubId → {total, byLevel}
+  hasUCLTitle: Record<number, boolean>;       // playerId → 是否拿过欧冠
+
+  // 赛后报告
+  snapshots: TurnSnapshot[];                   // 每轮财务快照
+  playerStats: Record<number, PlayerStats>;    // playerId → 累计统计
+  events: GameEvent[];                         // 大事记
+  bankruptTeams: Record<number, { name: string; avgOvr: number; players: { name: string; ovr: number }[]; leagueTitles: number; cupTitles: number; eclTitles: number; uelTitles: number; uclTitles: number }>; // 破产时记录最强球队
 
   // UI state（保留原有）
   pendingAction: PendingAction | null;
@@ -186,7 +210,6 @@ export type PendingActionType =
   | 'buy_sponsor'
   | 'upgrade'
   | 'visit_or_challenge'
-  | 'challenge_roll'
   | 'confirm_pay'
   | 'loan'
   | 'airport_fly'
@@ -211,6 +234,7 @@ export interface PendingAction {
   cardId?: string;           // 球员卡 id
   instanceUid?: string;      // 球员实例 uid
   matchSide?: 'home' | 'away';
+  playerId?: number;         // 操作权归属（用于巅峰对决等需要切换操作者的场景）
 }
 
 export interface ActionOption {
@@ -241,8 +265,6 @@ export type GameAction =
   | { type: 'UPGRADE_CLUB'; cellId: number }
   | { type: 'PAY_VISIT'; cellId: number }
   | { type: 'START_CHALLENGE'; cellId: number }
-  | { type: 'CHALLENGER_ROLL'; value: number }
-  | { type: 'OWNER_ROLL'; value: number }
   | { type: 'TAKE_LOAN'; amount: number }
   | { type: 'DEPOSIT'; amount: number }
   | { type: 'WITHDRAW'; amount: number }
@@ -270,7 +292,6 @@ export type GameAction =
   | { type: 'ROLL_MATCH_DICE' }
   | { type: 'CONFIRM_MATCH_RESULT' }
   // 联赛结算
-  | { type: 'SETTLE_LEAGUE'; level: number }
   | { type: 'EXECUTE_BANKRUPT' }
   | { type: 'EXECUTE_BANKRUPT_ID'; playerId: number }
   | { type: 'FORFEIT_MATCH'; side: 'home' | 'away' };

@@ -2,8 +2,8 @@ import { GameState, LeagueTable } from '../types';
 import { BOARD_CELLS } from '../data/board';
 import { FOOD_PLAYERS, ANIMAL_PLAYERS, TRANSFER_PLAYERS, YOUTH_PLAYERS } from '../data/players';
 
-export const PLAYER_COLORS = ['#ff69b4', '#f5f5f5', '#fff176', '#a0522d', '#c4a4e0', '#81c784'];
-export const PLAYER_COLOR_NAMES = ['粉', '白', '浅黄', '棕', '浅紫', '浅绿'];
+export const PLAYER_COLORS = ['#ff69b4', '#f5f5f5', '#fff176', '#a0522d', '#c4a4e0', '#81c784', '#ff5f1f'];
+export const PLAYER_COLOR_NAMES = ['粉', '白', '浅黄', '棕', '浅紫', '浅绿', '荧光橙'];
 
 function createEmptyLeagueTables(playerCount: number): LeagueTable[] {
   const arr: LeagueTable[] = [{} as LeagueTable]; // index 0 dummy
@@ -56,29 +56,26 @@ export function createInitialState(): GameState {
     clubTrophies: {},
     hasUCLTitle: {},
 
+    // 赛后报告
+    snapshots: [],
+    playerStats: {},
+    events: [],
+    bankruptTeams: {},
+
     pendingAction: null,
     challengeState: null,
   };
 }
 
-export function initPlayerPools(): {
-  foodPool: string[];
-  animalPool: string[];
-  transferPool: string[];
-  youthPool: string[];
-  instances: [];
-  trainingPoints: {};
-  clubTrophies: {},
-    hasUCLTitle: {};
-} {
+export function initPlayerPools() {
   return {
     foodPool: [...FOOD_PLAYERS.map(p => p.id)],
     animalPool: [...ANIMAL_PLAYERS.map(p => p.id)],
     transferPool: [...TRANSFER_PLAYERS.map(p => p.id)],
     youthPool: [...YOUTH_PLAYERS.map(p => p.id)],
-    instances: [],
-    trainingPoints: {},
-    clubTrophies: {},
-    hasUCLTitle: {},
+    instances: [] as GameState['instances'],
+    trainingPoints: {} as Record<number, number>,
+    clubTrophies: {} as Record<number, GameState['clubTrophies'][number]>,
+    hasUCLTitle: {} as Record<number, boolean>,
   };
 }

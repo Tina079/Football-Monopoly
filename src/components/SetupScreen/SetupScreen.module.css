@@ -77,6 +77,18 @@
   font-size: 14px;
   color: #ccc;
 }
+.nameInput {
+  width: 90px;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 13px;
+  outline: none;
+}
+.nameInput:focus { border-color: #f0c060; }
+.nameInput::placeholder { color: #555; }
 
 .colorOptions {
   display: flex;
@@ -111,3 +123,31 @@
   border-radius: 10px;
   margin-top: 8px;
 }
+
+.rulesBtn {
+  display: block; width: 100%; margin-bottom: 8px; padding: 8px;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; color: #999; font-size: 13px; cursor: pointer; transition: all .2s;
+}
+.rulesBtn:hover { background: rgba(255,255,255,0.08); color: #f0c060; border-color: rgba(240,192,96,0.2); }
+
+.ghLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 20px;
+  padding: 8px 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  color: #bbb;
+  font-size: 14px;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+.ghLink:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: #f0c060;
+  color: #f0c060;
+}
+

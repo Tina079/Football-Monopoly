@@ -51,10 +51,23 @@
 }
 
 .resetBtn {
+  display: block; width: 100%;
   padding: 12px 32px;
   background: linear-gradient(135deg, #f0c060, #e94560);
   color: #fff;
   font-size: 16px;
   font-weight: 700;
   border-radius: 10px;
+  margin-bottom: 12px;
 }
+.resetBtnSecondary {
+  display: block; width: 100%;
+  padding: 10px 32px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #aaa;
+  font-size: 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.resetBtnSecondary:hover { background: rgba(255,255,255,0.1); }

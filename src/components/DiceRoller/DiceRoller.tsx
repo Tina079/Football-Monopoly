@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext';
-import { BOARD_CELLS } from '../../data/board';
 import { ALL_PLAYERS } from '../../data/players';
 import SavePanel from '../SavePanel/SavePanel';
 import styles from './DiceRoller.module.css';
@@ -11,13 +10,14 @@ const DICE_FACES: Record<number, string> = {
 
 export default function ActionBar() {
   const { state, dispatch } = useGame();
-  const { phase, currentPlayerIndex, players, diceValue, pendingAction, challengeState, transferBidState, matchState } = state;
+  const { phase, currentPlayerIndex, players, diceValue, pendingAction, transferBidState, matchState } = state;
 
   // ===== 机器人自动操作 =====
   const [botPicked, setBotPicked] = useState<string | null>(null);
   const botTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 转会竞价时看当前出价者/得标者，否则看当前回合玩家
+  // 操作权归属：pendingAction.playerId 优先（巅峰对决切换控制权等场景）
   const botCheckId = (() => {
+    if (pendingAction?.playerId !== undefined) return pendingAction.playerId;
     if (transferBidState?.phase === 'bidding') return transferBidState.bidders[transferBidState.bidderIndex];
     if (pendingAction?.type === 'assign_player' && pendingAction.instanceUid) {
       const inst = state.instances.find(i => i.uid === pendingAction.instanceUid);
@@ -28,68 +28,102 @@ export default function ActionBar() {
   const isBot = players[botCheckId]?.isAI && !players[botCheckId]?.isBankrupt && phase === 'playing';
   const botColor = players[currentPlayerIndex]?.color || '#f0c060';
 
-  // ===== 比赛结果/空阵判定 1.5s 全员自动推进 =====
+  // ===== 比赛机器人选人（独立于 isBot，不绑定当前回合玩家） =====
+  useEffect(() => {
+    if (!matchState || matchState.phase !== 'picking') return;
+    const isHomeBot = players[matchState.homePlayerId]?.isAI;
+    const isAwayBot = players[matchState.awayPlayerId]?.isAI;
+
+    // 双方都是机器人且都没选 → 同时立刻选
+    if (isHomeBot && isAwayBot && !matchState.homePick && !matchState.awayPick) {
+      const homeAvail = matchState.homeSquad.filter((uid: string) => !matchState.homeUsed.includes(uid));
+      const awayAvail = matchState.awaySquad.filter((uid: string) => !matchState.awayUsed.includes(uid));
+      if (homeAvail.length > 0 && awayAvail.length > 0) {
+        dispatch({ type: 'PICK_MATCH_PLAYER', instanceUid: homeAvail[Math.floor(Math.random() * homeAvail.length)], side: 'home' });
+        dispatch({ type: 'PICK_MATCH_PLAYER', instanceUid: awayAvail[Math.floor(Math.random() * awayAvail.length)], side: 'away' });
+      }
+      return;
+    }
+
+    // 主队机器人且未选 → 立刻选
+    if (isHomeBot && !matchState.homePick) {
+      const avail = matchState.homeSquad.filter((uid: string) => !matchState.homeUsed.includes(uid));
+      if (avail.length > 0) {
+        dispatch({ type: 'PICK_MATCH_PLAYER', instanceUid: avail[Math.floor(Math.random() * avail.length)], side: 'home' });
+      }
+      return;
+    }
+
+    // 客队机器人且主队已选且客队未选 → 立刻选
+    if (isAwayBot && matchState.homePick && !matchState.awayPick) {
+      const avail = matchState.awaySquad.filter((uid: string) => !matchState.awayUsed.includes(uid));
+      if (avail.length > 0) {
+        dispatch({ type: 'PICK_MATCH_PLAYER', instanceUid: avail[Math.floor(Math.random() * avail.length)], side: 'away' });
+      }
+    }
+  }, [matchState?.phase, matchState?.homePick, matchState?.awayPick, matchState?.round, players]);
+
+  // ===== 机器人vs机器人：自动确认选人（双方选完后 2s） =====
+  useEffect(() => {
+    if (pendingAction?.type !== 'match_pick') return;
+    if (!matchState) return;
+    const isHomeBot = players[matchState.homePlayerId]?.isAI;
+    const isAwayBot = players[matchState.awayPlayerId]?.isAI;
+    if (!isHomeBot || !isAwayBot) return; // 只有双方都是机器人才自动
+    const t = setTimeout(() => dispatch({ type: 'ROLL_MATCH_DICE' }), 2000);
+    return () => clearTimeout(t);
+  }, [pendingAction?.type, pendingAction?.message]);
+
+  // ===== 比赛结果 1.5s 自动推进（仅双方都是机器人时） =====
   useEffect(() => {
     const isReveal = pendingAction?.type === 'match_reveal';
     const isAutoResolve = pendingAction?.type === 'post_move' && pendingAction.options[0]?.action === 'CONFIRM_MATCH_RESULT';
     if (!isReveal && !isAutoResolve) return;
+    // 只有双方都是机器人才自动推进，有人类参与时等人类手动点
+    if (!matchState) return;
+    const isHomeBot = players[matchState.homePlayerId]?.isAI;
+    const isAwayBot = players[matchState.awayPlayerId]?.isAI;
+    if (!isHomeBot || !isAwayBot) return;
     const t = setTimeout(() => dispatch({ type: 'CONFIRM_MATCH_RESULT' }), 1500);
     return () => clearTimeout(t);
-  }, [pendingAction?.type, pendingAction?.message]);
+  }, [pendingAction?.type, pendingAction?.message, matchState, players]);
 
-  // ===== 机器人自动操作 =====
+  // ===== 机器人自动操作（非比赛场景） =====
   const botPlayer = players[botCheckId];
   useEffect(() => {
     if (!isBot) { setBotPicked(null); return; }
 
-    // 比赛选人
-    if (matchState?.phase === 'picking') {
-      const side = matchState.homePick ? 'away' : 'home';
-      const isHomeBot = players[matchState.homePlayerId]?.isAI;
-      const isAwayBot = players[matchState.awayPlayerId]?.isAI;
-      const shouldAct = (side === 'home' && isHomeBot) || (side === 'away' && isAwayBot);
-      if (!shouldAct) { setBotPicked(null); return; }
-      const squad = side === 'home' ? matchState.homeSquad : matchState.awaySquad;
-      const used = side === 'home' ? matchState.homeUsed : matchState.awayUsed;
-      const avail = squad.filter((uid: string) => !used.includes(uid));
-      if (avail.length === 0) { setBotPicked(null); return; }
-      const pick = avail[Math.floor(Math.random() * avail.length)];
-      botTimer.current = setTimeout(() => {
-        dispatch({ type: 'PICK_MATCH_PLAYER', instanceUid: pick, side });
-        setBotPicked(null);
-      }, 2000);
-      return;
-    }
+    // 比赛确认类操作由专用 useEffect 处理（match_pick / match_reveal），主循环不插手
+    if (pendingAction?.type === 'match_pick' || pendingAction?.type === 'match_reveal') { setBotPicked(null); return; }
 
     if (!pendingAction || pendingAction.options.length === 0) { setBotPicked(null); return; }
     const enabled = pendingAction.options.filter((o: { disabled?: boolean }) => !o.disabled);
-    const pick = enabled.length > 0 ? enabled : pendingAction.options;
+    let pick = enabled.length > 0 ? enabled : pendingAction.options;
 
     // 智能选择：优先理性操作
-    let chosen = pick[Math.floor(Math.random() * pick.length)];
     const p = botPlayer;
     if (p && pendingAction?.type === 'loan') {
+      // 现金>10kw 或 存款>10kw 时排除贷款选项
+      if (p.cash > 10 || p.savings > 10) {
+        const noLoan = pick.filter((o: { action: string }) => !o.action.startsWith('TAKE_LOAN'));
+        if (noLoan.length > 0) pick = noLoan;
+      }
       const repayAll = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:') && o.action.includes('全部'));
       const repayBig = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:10') || o.action.startsWith('REPAY_LOAN:5'));
       const withdrawBig = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:10') || o.action.startsWith('WITHDRAW:5'));
       const withdrawAny = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:'));
       const leave = pick.find((o: { action: string }) => o.action === 'DECLINE_LOAN');
-      if (p.debt > 0 && p.cash >= 5 && repayBig) chosen = repayBig;
-      else if (p.debt > 0 && repayAll && p.cash >= p.debt) chosen = repayAll;
-      else if (p.debt > 0 && p.savings >= 5 && withdrawBig) {
-        chosen = withdrawBig; // 现金不够还债但存款有，先取出来
-      } else if (p.debt > 0 && p.savings > 0 && withdrawAny) {
-        chosen = withdrawAny;
-      } else if (p.debt > 0) {
-        if (leave) chosen = leave;
-      } else if (p.cash < 5 && p.savings > 5 && withdrawBig) {
-        chosen = withdrawBig;
-      } else if (p.cash < 5) {
-        if (leave) chosen = leave;
-      }
+      if (p.debt > 0 && p.cash >= 5 && repayBig) pick = [repayBig];
+      else if (p.debt > 0 && repayAll && p.cash >= p.debt) pick = [repayAll];
+      else if (p.debt > 0 && p.savings >= 5 && withdrawBig) pick = [withdrawBig];
+      else if (p.debt > 0 && p.savings > 0 && withdrawAny) pick = [withdrawAny];
+      else if (p.debt > 0) { if (leave) pick = [leave]; }
+      else if (p.cash < 5 && p.savings > 5 && withdrawBig) pick = [withdrawBig];
+      else if (p.cash < 5) { if (leave) pick = [leave]; }
     }
-    if (p && pendingAction?.type === 'transfer_bid') {
-      // 有空位且有钱 → 优先竞拍；否则离开
+    let chosen = pick[Math.floor(Math.random() * pick.length)];
+    if (p && pendingAction?.type === 'transfer_bid' && !pendingAction.options.some((o: { action: string }) => o.action === 'YOUTH_DRAW')) {
+      // 有空位且有钱 → 优先竞拍；否则离开（青训学院除外，已独立处理）
       const bidOpt = pick.find((o: { action: string }) => o.action.startsWith('PLACE_BID') || o.action.startsWith('START_BID'));
       const leaveOpt = pick.find((o: { action: string }) => o.action === 'SKIP_TRANSFER' || o.action === 'PASS_BID');
       if (bidOpt && !bidOpt.disabled) chosen = bidOpt;
@@ -114,6 +148,19 @@ export default function ActionBar() {
         if (upOpt && !upOpt.disabled) chosen = upOpt;
       }
     }
+    if (p && (pendingAction?.type === 'buy_club' || pendingAction?.type === 'buy_sponsor')) {
+      // 没有地产时能买就买；现金>10kw时有钱就买
+      const buyOpt = pick.find(o => (o.action.startsWith('BUY_CLUB') || o.action.startsWith('BUY_SPONSOR')) && !o.disabled);
+      if (buyOpt) {
+        const myClubs = Object.entries(state.cellOwners).filter(([,oid]) => oid === p.id);
+        if (myClubs.length === 0 || p.cash > 10) chosen = buyOpt;
+      }
+    }
+    // 青训：现金>5kw必买
+    if (p && pendingAction?.type === 'transfer_bid' && pendingAction.options.some(o => o.action === 'YOUTH_DRAW')) {
+      const youthOpt = pick.find(o => o.action === 'YOUTH_DRAW' && !o.disabled);
+      if (youthOpt && p.cash > 5) chosen = youthOpt;
+    }
     if (p && pendingAction?.type === 'visit_or_challenge') {
       const challOpt = pick.find((o: { action: string; disabled?: boolean }) => o.action.startsWith('CHALLENGE') && !o.disabled);
       if (challOpt) {
@@ -123,17 +170,23 @@ export default function ActionBar() {
       }
     }
     if (p && pendingAction?.type === 'match_setup') {
-      // 选人数最多的球队，平手选平均OVR最高的
-      const matchOpts = pick.filter((o: { action: string; disabled?: boolean }) => o.action.startsWith('START_MATCH') && !o.disabled);
-      if (matchOpts.length > 0) {
-        let best = matchOpts[0], bestCount = 0, bestOvr = 0;
-        for (const opt of matchOpts) {
-          const cid = parseInt(opt.action.split(':')[2]);
-          const count = state.instances.filter(i => i.clubId === cid).length;
-          const avgOvr = count > 0 ? state.instances.filter(i => i.clubId === cid).reduce((s, i) => { const c = ALL_PLAYERS.find(x => x.id === i.cardId); return s + (c?.ovr || 0); }, 0) / count : 0;
-          if (count > bestCount || (count === bestCount && avgOvr > bestOvr)) { best = opt; bestCount = count; bestOvr = avgOvr; }
+      if (state.peakDuel) {
+        // 巅峰对决：挑战者选己队(PEAK_DUEL_CLUB) 或 被挑战者选己队(START_MATCH)
+        // playerId 已确保操作权归属正确，直接选一个即可
+        const peakOpts = pick.filter((o: { action: string; disabled?: boolean }) => !o.disabled);
+        if (peakOpts.length > 0) chosen = peakOpts[Math.floor(Math.random() * peakOpts.length)];
+      } else {
+        const matchOpts = pick.filter((o: { action: string; disabled?: boolean }) => o.action.startsWith('START_MATCH') && !o.disabled);
+        if (matchOpts.length > 0) {
+          let best = matchOpts[0], bestCount = 0, bestOvr = 0;
+          for (const opt of matchOpts) {
+            const cid = parseInt(opt.action.split(':')[2]);
+            const count = state.instances.filter(i => i.clubId === cid).length;
+            const avgOvr = count > 0 ? state.instances.filter(i => i.clubId === cid).reduce((s, i) => { const c = ALL_PLAYERS.find(x => x.id === i.cardId); return s + (c?.ovr || 0); }, 0) / count : 0;
+            if (count > bestCount || (count === bestCount && avgOvr > bestOvr)) { best = opt; bestCount = count; bestOvr = avgOvr; }
+          }
+          chosen = best;
         }
-        chosen = best;
       }
     }
     if (p && (pendingAction?.type === 'street_food' || pendingAction?.type === 'street_animal')) {
@@ -174,11 +227,12 @@ export default function ActionBar() {
     }, 5000);
 
     return () => { if (botTimer.current) clearTimeout(botTimer.current); clearTimeout(safetyTimer); };
-  }, [isBot, pendingAction?.type, pendingAction?.message, matchState?.phase, matchState?.round, matchState?.homePick, matchState?.awayPick]);
+  }, [isBot, pendingAction?.type, pendingAction?.message]);
 
   // ===== 正常渲染 =====
   if (phase !== 'playing') return null;
   const displayPlayerId = (() => {
+    if (pendingAction?.playerId !== undefined) return pendingAction.playerId;
     if (transferBidState?.phase === 'bidding') return transferBidState.bidders[transferBidState.bidderIndex];
     if (transferBidState?.phase === 'assign') return transferBidState.currentBidderId ?? currentPlayerIndex;
     if (pendingAction?.type === 'assign_player' && pendingAction.instanceUid) {
@@ -211,36 +265,6 @@ export default function ActionBar() {
 
   const isSimpleStep = pendingAction?.type === 'post_move' && pendingAction.options.length === 1;
 
-  // 挑战 UI
-  if (challengeState && (pendingAction?.type === 'challenge_roll' || pendingAction?.type === 'confirm_pay')) {
-    const cell = BOARD_CELLS[challengeState.cellId];
-    const owner = players[state.cellOwners[challengeState.cellId]];
-    return (
-      <div className={styles.container}>
-        <SavePanel />
-        <div className={styles.currentPlayer}>
-          <span className={styles.dot} style={{ backgroundColor: player.color }} />
-          <span className={styles.name}>{player.name}</span>
-        </div>
-        <div className={styles.challengeBox}>
-          <div className={styles.challengeRow}>
-            <span className={styles.challengeLabel}>⚔️ {cell?.name ?? '?'} 挑战</span>
-            <span className={styles.vsLabel}>地主: {owner?.name}</span>
-          </div>
-          <div className={styles.diceRow}>
-            <span className={styles.rollBox}>{player.name}: <strong>{challengeState.challengerRoll ?? '?'}</strong></span>
-            <span className={styles.vsText}>VS</span>
-            <span className={styles.rollBox}>{owner?.name}: <strong>{challengeState.ownerRoll ?? '?'}</strong></span>
-          </div>
-          {challengeState.ownerRoll !== null && <span className={styles.resultMsg}>{pendingAction.message}</span>}
-          <button className={styles.actionBtn} onClick={() => handleAction(pendingAction.options[0].action, pendingAction.cellId)}>
-            {pendingAction.options[0].label}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // 正常人类 UI
   return (
     <div className={styles.container}>
@@ -271,7 +295,7 @@ export default function ActionBar() {
           </>
         );
       })()}
-      {pendingAction && !isSimpleStep && pendingAction.type !== 'challenge_roll' && (
+      {pendingAction && !isSimpleStep && (
         <div className={styles.actionGroup}>
           <span className={styles.actionPrompt}>{pendingAction.message}</span>
           <div className={styles.actionBtns}>
