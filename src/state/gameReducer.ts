@@ -839,7 +839,7 @@ function gameReducerCore(state: GameState, action: GameAction): GameState {
     // ===== 掷骰子对决 =====
     case 'ROLL_MATCH_DICE': {
       const ms = state.matchState;
-      if (!ms || !ms.homePick || !ms.awayPick) return state;
+      if (!ms || ms.phase !== 'picking' || !ms.homePick || !ms.awayPick) return state;
       const diceValue = rollDice();
       const newMs = { ...ms, diceValue, phase: 'reveal' as const };
       const homeInst = state.instances.find(i => i.uid === ms.homePick);
@@ -930,7 +930,7 @@ function gameReducerCore(state: GameState, action: GameAction): GameState {
     // ===== 确认比赛结果 → 下一轮/金球/结束 =====
     case 'CONFIRM_MATCH_RESULT': {
       const ms = state.matchState;
-      if (!ms) return state;
+      if (!ms || ms.phase === 'picking') return state;
       const isRegularEnd = ms.round >= ms.maxRounds;
       // 检查平局
       if (isRegularEnd && ms.homeScore === ms.awayScore) {
