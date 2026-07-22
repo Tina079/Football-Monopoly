@@ -64,6 +64,8 @@ export default function ActionBar() {
   }, [matchState?.phase, matchState?.homePick, matchState?.awayPick, matchState?.round, players]);
 
   // ===== 机器人vs机器人：自动确认选人（双方选完后 2s） =====
+  const matchStateRef = useRef(matchState);
+  matchStateRef.current = matchState;
   useEffect(() => {
     if (pendingAction?.type !== 'match_pick') return;
     if (!matchState) return;
@@ -71,8 +73,7 @@ export default function ActionBar() {
     const isAwayBot = players[matchState.awayPlayerId]?.isAI;
     if (!isHomeBot || !isAwayBot) return;
     const t = setTimeout(() => {
-      // 防止投降/结束后仍然触发
-      if (!matchState || matchState.phase !== 'picking') return;
+      if (!matchStateRef.current) return;
       dispatch({ type: 'ROLL_MATCH_DICE' });
     }, 2000);
     return () => clearTimeout(t);
@@ -88,7 +89,7 @@ export default function ActionBar() {
     const isAwayBot = players[matchState.awayPlayerId]?.isAI;
     if (!isHomeBot || !isAwayBot) return;
     const t = setTimeout(() => {
-      if (!matchState) return;
+      if (!matchStateRef.current) return;
       dispatch({ type: 'CONFIRM_MATCH_RESULT' });
     }, 1500);
     return () => clearTimeout(t);
