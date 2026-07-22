@@ -7,7 +7,7 @@ import styles from './StatsPanel.module.css';
 
 export default function StatsPanel() {
   const { state } = useGame();
-  const { players, currentPlayerIndex, log, cellLevels, instances, clubTrophies, trainingPoints } = state;
+  const { players, currentPlayerIndex, cellLevels, instances, clubTrophies, trainingPoints } = state;
   const [reportPid, setReportPid] = useState<number | null>(null);
 
   return (<>
@@ -190,18 +190,6 @@ export default function StatsPanel() {
         <div className={styles.refNote}>费用 = 购买/升级/参观费/比赛日收入（挑战失败费用×2）</div>
       </div>
 
-      {/* 事件日志 */}
-      <div className={styles.section}>
-        <h3 className={styles.heading}>📜 事件日志</h3>
-        <div className={styles.logList}>
-          {log.slice(0, 8).map((msg, i) => (
-            <div key={i} className={styles.logItem}>{msg}</div>
-          ))}
-          {log.length === 0 && (
-            <div className={styles.logEmpty}>暂无事件</div>
-          )}
-        </div>
-      </div>
     </div>
     {reportPid !== null && <PostGameReport state={state} playerId={reportPid} onClose={() => setReportPid(null)} />}
   </>

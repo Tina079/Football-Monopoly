@@ -88,6 +88,10 @@ export default function ActionBar() {
     return () => clearTimeout(t);
   }, [pendingAction?.type, pendingAction?.message, matchState, players]);
 
+  // ===== 银行操作计数器 =====
+  const bankOpCount = useRef(0);
+  if (pendingAction?.type !== 'loan') { bankOpCount.current = 0; }
+
   // ===== 机器人自动操作（非比赛场景） =====
   const botPlayer = players[botCheckId];
   useEffect(() => {
@@ -103,23 +107,27 @@ export default function ActionBar() {
     // 智能选择：优先理性操作
     const p = botPlayer;
     if (p && pendingAction?.type === 'loan') {
-      // 现金>10kw 或 存款>10kw 时排除贷款选项
-      if (p.cash > 10 || p.savings > 10) {
-        const noLoan = pick.filter((o: { action: string }) => !o.action.startsWith('TAKE_LOAN'));
-        if (noLoan.length > 0) pick = noLoan;
-      }
-      const repayAll = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:') && o.action.includes('全部'));
-      const repayBig = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:10') || o.action.startsWith('REPAY_LOAN:5'));
-      const withdrawBig = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:10') || o.action.startsWith('WITHDRAW:5'));
-      const withdrawAny = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:'));
+      bankOpCount.current++;
       const leave = pick.find((o: { action: string }) => o.action === 'DECLINE_LOAN');
-      if (p.debt > 0 && p.cash >= 5 && repayBig) pick = [repayBig];
-      else if (p.debt > 0 && repayAll && p.cash >= p.debt) pick = [repayAll];
-      else if (p.debt > 0 && p.savings >= 5 && withdrawBig) pick = [withdrawBig];
-      else if (p.debt > 0 && p.savings > 0 && withdrawAny) pick = [withdrawAny];
-      else if (p.debt > 0) { if (leave) pick = [leave]; }
-      else if (p.cash < 5 && p.savings > 5 && withdrawBig) pick = [withdrawBig];
-      else if (p.cash < 5) { if (leave) pick = [leave]; }
+      if (bankOpCount.current > 3) {
+        if (leave) pick = [leave];
+      } else {
+        if (p.cash > 10 || p.savings > 10) {
+          const noLoan = pick.filter((o: { action: string }) => !o.action.startsWith('TAKE_LOAN'));
+          if (noLoan.length > 0) pick = noLoan;
+        }
+        const repayAll = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:') && o.action.includes('全部'));
+        const repayBig = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:10') || o.action.startsWith('REPAY_LOAN:5'));
+        const withdrawBig = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:10') || o.action.startsWith('WITHDRAW:5'));
+        const withdrawAny = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:'));
+        if (p.debt > 0 && p.cash >= 5 && repayBig) pick = [repayBig];
+        else if (p.debt > 0 && repayAll && p.cash >= p.debt) pick = [repayAll];
+        else if (p.debt > 0 && p.savings >= 5 && withdrawBig) pick = [withdrawBig];
+        else if (p.debt > 0 && p.savings > 0 && withdrawAny) pick = [withdrawAny];
+        else if (p.debt > 0) { if (leave) pick = [leave]; }
+        else if (p.cash < 5 && p.savings > 5 && withdrawBig) pick = [withdrawBig];
+        else if (p.cash < 5) { if (leave) pick = [leave]; }
+      }
     }
     let chosen = pick[Math.floor(Math.random() * pick.length)];
     if (p && pendingAction?.type === 'transfer_bid' && !pendingAction.options.some((o: { action: string }) => o.action === 'YOUTH_DRAW')) {
@@ -149,11 +157,15 @@ export default function ActionBar() {
       }
     }
     if (p && (pendingAction?.type === 'buy_club' || pendingAction?.type === 'buy_sponsor')) {
-      // 没有地产时能买就买；现金>10kw时有钱就买
       const buyOpt = pick.find(o => (o.action.startsWith('BUY_CLUB') || o.action.startsWith('BUY_SPONSOR')) && !o.disabled);
       if (buyOpt) {
-        const myClubs = Object.entries(state.cellOwners).filter(([,oid]) => oid === p.id);
-        if (myClubs.length === 0 || p.cash > 10) chosen = buyOpt;
+        if (buyOpt.action.startsWith('BUY_SPONSOR')) { chosen = buyOpt; }
+        else {
+          const myClubCount = Object.entries(state.cellOwners)
+            .filter(([, oid]) => oid === p.id)
+            .filter(([cid]) => state.cells[parseInt(cid)]?.type === 'club').length;
+          if (myClubCount < 3 || p.cash > 10) chosen = buyOpt;
+        }
       }
     }
     // 青训：现金>5kw必买
@@ -164,29 +176,29 @@ export default function ActionBar() {
     if (p && pendingAction?.type === 'visit_or_challenge') {
       const challOpt = pick.find((o: { action: string; disabled?: boolean }) => o.action.startsWith('CHALLENGE') && !o.disabled);
       if (challOpt) {
-        // 主场没球员 → 必挑战；有球员 → 随机
-        const homeHasPlayers = state.instances.some(i => i.clubId === pendingAction?.cellId);
-        if (!homeHasPlayers || Math.random() < 0.5) chosen = challOpt;
+        const homeClubId = pendingAction?.cellId;
+        const x = state.instances.filter(i => i.clubId === homeClubId).length;
+        const myClubIds = Object.entries(state.cellOwners).filter(([, oid]) => oid === p.id).map(([cid]) => parseInt(cid));
+        let y = 0;
+        for (const cid of myClubIds) { const cnt = state.instances.filter(i => i.clubId === cid).length; if (cnt > y) y = cnt; }
+        if (x === 0) { chosen = challOpt; }
+        else if (x > 2 * y) { /* 不挑战 */ }
+        else if (y > x) { if (Math.random() < 0.8) chosen = challOpt; }
+        else if (y === x) { if (Math.random() < 0.6) chosen = challOpt; }
+        else if (y > x / 2) { if (Math.random() < 0.3) chosen = challOpt; }
       }
     }
     if (p && pendingAction?.type === 'match_setup') {
-      if (state.peakDuel) {
-        // 巅峰对决：挑战者选己队(PEAK_DUEL_CLUB) 或 被挑战者选己队(START_MATCH)
-        // playerId 已确保操作权归属正确，直接选一个即可
-        const peakOpts = pick.filter((o: { action: string; disabled?: boolean }) => !o.disabled);
-        if (peakOpts.length > 0) chosen = peakOpts[Math.floor(Math.random() * peakOpts.length)];
-      } else {
-        const matchOpts = pick.filter((o: { action: string; disabled?: boolean }) => o.action.startsWith('START_MATCH') && !o.disabled);
-        if (matchOpts.length > 0) {
-          let best = matchOpts[0], bestCount = 0, bestOvr = 0;
-          for (const opt of matchOpts) {
-            const cid = parseInt(opt.action.split(':')[2]);
-            const count = state.instances.filter(i => i.clubId === cid).length;
-            const avgOvr = count > 0 ? state.instances.filter(i => i.clubId === cid).reduce((s, i) => { const c = ALL_PLAYERS.find(x => x.id === i.cardId); return s + (c?.ovr || 0); }, 0) / count : 0;
-            if (count > bestCount || (count === bestCount && avgOvr > bestOvr)) { best = opt; bestCount = count; bestOvr = avgOvr; }
-          }
-          chosen = best;
+      const matchOpts = pick.filter((o: { action: string; disabled?: boolean }) => (o.action.startsWith('START_MATCH') || o.action.startsWith('PEAK_DUEL_CLUB')) && !o.disabled);
+      if (matchOpts.length > 0) {
+        let best = matchOpts[0], bestCount = 0, bestOvr = 0;
+        for (const opt of matchOpts) {
+          const cid = parseInt(opt.action.split(':')[2]);
+          const count = state.instances.filter(i => i.clubId === cid).length;
+          const avgOvr = count > 0 ? state.instances.filter(i => i.clubId === cid).reduce((s, i) => { const c = ALL_PLAYERS.find(x => x.id === i.cardId); return s + (c?.ovr || 0); }, 0) / count : 0;
+          if (count > bestCount || (count === bestCount && avgOvr > bestOvr)) { best = opt; bestCount = count; bestOvr = avgOvr; }
         }
+        chosen = best;
       }
     }
     if (p && (pendingAction?.type === 'street_food' || pendingAction?.type === 'street_animal')) {

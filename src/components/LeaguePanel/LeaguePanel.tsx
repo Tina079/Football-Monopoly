@@ -7,7 +7,7 @@ import styles from './LeaguePanel.module.css';
 
 export default function LeaguePanel() {
   const { state } = useGame();
-  const { leagueTables, players } = state;
+  const { leagueTables, players, log } = state;
 
   if (state.phase !== 'playing') return null;
 
@@ -47,6 +47,19 @@ export default function LeaguePanel() {
           </div>
         );
       })}
+
+      {/* 事件日志 */}
+      <div className={styles.logSection}>
+        <h3 className={styles.heading}>📜 事件日志</h3>
+        <div className={styles.logList}>
+          {log.slice(0, 8).map((msg: string, i: number) => (
+            <div key={i} className={styles.logItem}>{msg}</div>
+          ))}
+          {log.length === 0 && (
+            <div className={styles.logEmpty}>暂无事件</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
