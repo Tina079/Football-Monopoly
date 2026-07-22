@@ -69,8 +69,12 @@ export default function ActionBar() {
     if (!matchState) return;
     const isHomeBot = players[matchState.homePlayerId]?.isAI;
     const isAwayBot = players[matchState.awayPlayerId]?.isAI;
-    if (!isHomeBot || !isAwayBot) return; // 只有双方都是机器人才自动
-    const t = setTimeout(() => dispatch({ type: 'ROLL_MATCH_DICE' }), 2000);
+    if (!isHomeBot || !isAwayBot) return;
+    const t = setTimeout(() => {
+      // 防止投降/结束后仍然触发
+      if (!matchState || matchState.phase !== 'picking') return;
+      dispatch({ type: 'ROLL_MATCH_DICE' });
+    }, 2000);
     return () => clearTimeout(t);
   }, [pendingAction?.type, pendingAction?.message]);
 
@@ -79,12 +83,14 @@ export default function ActionBar() {
     const isReveal = pendingAction?.type === 'match_reveal';
     const isAutoResolve = pendingAction?.type === 'post_move' && pendingAction.options[0]?.action === 'CONFIRM_MATCH_RESULT';
     if (!isReveal && !isAutoResolve) return;
-    // 只有双方都是机器人才自动推进，有人类参与时等人类手动点
     if (!matchState) return;
     const isHomeBot = players[matchState.homePlayerId]?.isAI;
     const isAwayBot = players[matchState.awayPlayerId]?.isAI;
     if (!isHomeBot || !isAwayBot) return;
-    const t = setTimeout(() => dispatch({ type: 'CONFIRM_MATCH_RESULT' }), 1500);
+    const t = setTimeout(() => {
+      if (!matchState) return;
+      dispatch({ type: 'CONFIRM_MATCH_RESULT' });
+    }, 1500);
     return () => clearTimeout(t);
   }, [pendingAction?.type, pendingAction?.message, matchState, players]);
 
