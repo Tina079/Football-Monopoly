@@ -2704,9 +2704,13 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
   // 跳过不影响现金的 action
   if (action.type === 'START_DICE_ANIMATION' || action.type === 'CONFIRM_MATCH_RESULT' ||
       action.type === 'ROLL_MATCH_DICE' || action.type === 'PICK_MATCH_PLAYER' ||
+      action.type === 'FORFEIT_MATCH' ||
       action.type === 'DEPOSIT' || action.type === 'WITHDRAW' ||
       action.type === 'TAKE_LOAN' || action.type === 'REPAY_LOAN' ||
       action.type === 'LOAD_GAME' || action.type === 'RESET_GAME' || action.type === 'START_GAME') {
+    if (action.type === 'ROLL_MATCH_DICE' || action.type === 'CONFIRM_MATCH_RESULT' || action.type === 'FORFEIT_MATCH') {
+      console.trace('[DISPATCH]', action.type, 'matchState=', !!state.matchState, 'phase=', state.matchState?.phase);
+    }
     return gameReducerCore(state, action);
   }
   const oldPlayers = state.players;

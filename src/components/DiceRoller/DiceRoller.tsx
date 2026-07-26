@@ -18,7 +18,7 @@ export default function ActionBar() {
   // 操作权归属：pendingAction.playerId 优先（巅峰对决切换控制权等场景）
   const botCheckId = (() => {
     if (pendingAction?.playerId !== undefined) return pendingAction.playerId;
-    if (transferBidState?.phase === 'bidding') return transferBidState.bidders[transferBidState.bidderIndex];
+    if (pendingAction?.type === 'transfer_bid' && transferBidState?.phase === 'bidding') return transferBidState.bidders[transferBidState.bidderIndex];
     if (pendingAction?.type === 'assign_player' && pendingAction.instanceUid) {
       const inst = state.instances.find(i => i.uid === pendingAction.instanceUid);
       if (inst) return inst.ownerId;
@@ -73,7 +73,8 @@ export default function ActionBar() {
     const isAwayBot = players[matchState.awayPlayerId]?.isAI;
     if (!isHomeBot || !isAwayBot) return;
     const t = setTimeout(() => {
-      if (!matchStateRef.current) return;
+      const ms = matchStateRef.current;
+      if (!ms || ms.phase !== 'picking') return;
       dispatch({ type: 'ROLL_MATCH_DICE' });
     }, 2000);
     return () => clearTimeout(t);
@@ -95,9 +96,17 @@ export default function ActionBar() {
     return () => clearTimeout(t);
   }, [pendingAction?.type, pendingAction?.message, matchState, players]);
 
-  // ===== 银行操作计数器 =====
+  // ===== 银行/训练营操作计数器 =====
   const bankOpCount = useRef(0);
-  if (pendingAction?.type !== 'loan') { bankOpCount.current = 0; }
+  const trainStep = useRef(0);
+  const trainDeterCount = useRef(0);
+  const trainCounts = useRef<Map<string, number>>(new Map());
+  if (pendingAction?.type !== 'loan') {
+    bankOpCount.current = 0;
+    trainStep.current = 0;
+    trainDeterCount.current = 0;
+    trainCounts.current = new Map();
+  }
 
   // ===== 机器人自动操作（非比赛场景） =====
   const botPlayer = players[botCheckId];
@@ -114,26 +123,88 @@ export default function ActionBar() {
     // 智能选择：优先理性操作
     const p = botPlayer;
     if (p && pendingAction?.type === 'loan') {
-      bankOpCount.current++;
       const leave = pick.find((o: { action: string }) => o.action === 'DECLINE_LOAN');
-      if (bankOpCount.current > 3) {
-        if (leave) pick = [leave];
-      } else {
-        if (p.cash > 10 || p.savings > 10) {
-          const noLoan = pick.filter((o: { action: string }) => !o.action.startsWith('TAKE_LOAN'));
-          if (noLoan.length > 0) pick = noLoan;
+      const isTrainingCamp = pendingAction.options.some((o: { action: string }) => o.action.startsWith('TRAIN_SELECT'));
+
+      // ===== 训练营策略 =====
+      if (isTrainingCamp) {
+        const tp = state.trainingPoints[p.id] || 0;
+        trainStep.current++;
+        if (trainStep.current === 1) {
+          trainDeterCount.current = Math.floor(0.8 * tp);
         }
-        const repayAll = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:') && o.action.includes('全部'));
-        const repayBig = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:10') || o.action.startsWith('REPAY_LOAN:5'));
-        const withdrawBig = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:10') || o.action.startsWith('WITHDRAW:5'));
-        const withdrawAny = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:'));
-        if (p.debt > 0 && p.cash >= 5 && repayBig) pick = [repayBig];
-        else if (p.debt > 0 && repayAll && p.cash >= p.debt) pick = [repayAll];
-        else if (p.debt > 0 && p.savings >= 5 && withdrawBig) pick = [withdrawBig];
-        else if (p.debt > 0 && p.savings > 0 && withdrawAny) pick = [withdrawAny];
-        else if (p.debt > 0) { if (leave) pick = [leave]; }
-        else if (p.cash < 5 && p.savings > 5 && withdrawBig) pick = [withdrawBig];
-        else if (p.cash < 5) { if (leave) pick = [leave]; }
+        // 确定性分配：每步重新评估最强球队和可训练球员
+        if (trainStep.current <= trainDeterCount.current) {
+          const calcOvr = (inst: { cardId: string; growth: number[] }) => {
+            const c = ALL_PLAYERS.find(x => x.id === inst.cardId);
+            if (!c) return 0;
+            return c.isGK ? c.ovr + (inst.growth[0] || 0) : c.ovr + Math.floor(inst.growth.reduce((a: number, b: number) => a + b, 0) / 6);
+          };
+          // 收集所有球队，按总 OVR 排序
+          const myClubIds = Object.entries(state.cellOwners)
+            .filter(([, oid]) => oid === p.id)
+            .map(([cid]) => parseInt(cid));
+          const clubRanks: { cid: number; total: number; topOvr: number }[] = [];
+          for (const cid of myClubIds) {
+            const squad = state.instances.filter(i => i.clubId === cid);
+            if (squad.length === 0) continue;
+            let total = 0, topOvr = 0;
+            for (const inst of squad) { const o = calcOvr(inst); total += o; if (o > topOvr) topOvr = o; }
+            clubRanks.push({ cid, total, topOvr });
+          }
+          clubRanks.sort((a, b) => b.total - a.total || b.topOvr - a.topOvr);
+          // 从最强球队开始，找第一个有可训练球员的
+          for (let ri = 0; ri < clubRanks.length; ri++) {
+            const { cid } = clubRanks[ri];
+            const trainable = state.instances
+              .filter(i => i.clubId === cid && calcOvr(i) < 100)
+              .map(i => ({ uid: i.uid, ovr: calcOvr(i) }));
+            if (trainable.length === 0) continue;
+            // 选本轮训练次数最少、OVR 最高的
+            trainable.sort((a, b) => {
+              const ca = trainCounts.current.get(a.uid) || 0;
+              const cb = trainCounts.current.get(b.uid) || 0;
+              if (ca !== cb) return ca - cb;
+              return b.ovr - a.ovr;
+            });
+            const target = trainable[0].uid;
+            const opt = pick.find((o: { action: string }) => o.action === `TRAIN_SELECT:${target}`);
+            if (opt && !opt.disabled) {
+              pick = [opt];
+              trainCounts.current.set(target, (trainCounts.current.get(target) || 0) + 1);
+            }
+            break; // 找到球队即可，不需要看后面的
+          }
+        }
+        // 剩余 0.2x 随机（含离开按钮）—— 走默认 chosen
+      }
+
+      // ===== 银行策略 =====
+      else {
+        bankOpCount.current++;
+        if (bankOpCount.current > 3) {
+          if (leave) pick = [leave];
+        } else {
+          if (p.cash > 10 || p.savings > 10) {
+            const noLoan = pick.filter((o: { action: string }) => !o.action.startsWith('TAKE_LOAN'));
+            if (noLoan.length > 0) pick = noLoan;
+          }
+          // 无负债且存款 ≥ 100kw → 直接离开银行
+          if (p.debt <= 0 && p.savings >= 100 && leave) { pick = [leave]; }
+          else {
+          const repayAll = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:') && o.action.includes('全部'));
+          const repayBig = pick.find((o: { action: string }) => o.action.startsWith('REPAY_LOAN:10') || o.action.startsWith('REPAY_LOAN:5'));
+          const withdrawBig = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:10') || o.action.startsWith('WITHDRAW:5'));
+          const withdrawAny = pick.find((o: { action: string }) => o.action.startsWith('WITHDRAW:'));
+          if (p.debt > 0 && p.cash >= 5 && repayBig) pick = [repayBig];
+          else if (p.debt > 0 && repayAll && p.cash >= p.debt) pick = [repayAll];
+          else if (p.debt > 0 && p.savings >= 5 && withdrawBig) pick = [withdrawBig];
+          else if (p.debt > 0 && p.savings > 0 && withdrawAny) pick = [withdrawAny];
+          else if (p.debt > 0) { if (leave) pick = [leave]; }
+          else if (p.cash < 5 && p.savings > 5 && withdrawBig) pick = [withdrawBig];
+          else if (p.cash < 5) { if (leave) pick = [leave]; }
+          }
+        }
       }
     }
     let chosen = pick[Math.floor(Math.random() * pick.length)];
@@ -153,15 +224,26 @@ export default function ActionBar() {
       else if (leaveOpt) chosen = leaveOpt;
     }
     if (p && pendingAction?.type === 'upgrade') {
-      // 所有球场剩余空位 ≤ 1 时一定升级
       const totalSlots = Object.entries(state.cellOwners)
         .filter(([, oid]) => oid === p.id)
         .reduce((sum, [cid]) => sum + (state.cellLevels[parseInt(cid)] || 1), 0);
       const totalPlayers = state.instances.filter(i => i.ownerId === p.id).length;
-      if (totalSlots - totalPlayers <= 1) {
-        const upOpt = pick.find((o: { action: string }) => o.action.startsWith('UPGRADE'));
-        if (upOpt && !upOpt.disabled) chosen = upOpt;
+      const upOpt = pick.find((o: { action: string }) => o.action.startsWith('UPGRADE'));
+      const canUpgrade = upOpt && !upOpt.disabled;
+      // 优先级1：总容量 - 总球员数 ≤ 2 且能升级 → 升级
+      if (totalSlots - totalPlayers <= 2 && canUpgrade) { chosen = upOpt; }
+      // 优先级2：此球队是玩家拥有中球员最多的 且能升级 → 升级
+      else if (canUpgrade && pendingAction?.cellId !== undefined) {
+        const thisClubPlayers = state.instances.filter(i => i.clubId === pendingAction.cellId).length;
+        const myClubIds = Object.entries(state.cellOwners)
+          .filter(([, oid]) => oid === p.id)
+          .map(([cid]) => parseInt(cid));
+        const maxPlayers = Math.max(0, ...myClubIds.map(cid => state.instances.filter(i => i.clubId === cid).length));
+        if (thisClubPlayers >= maxPlayers) { chosen = upOpt; }
       }
+      // 优先级3：现金 > 10kw 且能升级 → 80% 升级
+      else if (p.cash > 10 && canUpgrade && Math.random() < 0.8) { chosen = upOpt; }
+      // 优先级4：else 随机（走默认 chosen）
     }
     if (p && (pendingAction?.type === 'buy_club' || pendingAction?.type === 'buy_sponsor')) {
       const buyOpt = pick.find(o => (o.action.startsWith('BUY_CLUB') || o.action.startsWith('BUY_SPONSOR')) && !o.disabled);
@@ -217,7 +299,7 @@ export default function ActionBar() {
     if (p && pendingAction?.type === 'visit_or_challenge' && pendingAction.options.some((o: { action: string }) => o.action.startsWith('MATCH_INCOME:repay'))) {
       const repay = pick.find((o: { action: string }) => o.action.startsWith('MATCH_INCOME:repay'));
       if (repay && p.debt > 0) chosen = repay;
-      else if (p.cash < 5) {
+      else if (p.cash < 10 || p.savings > 80) {
         const cash = pick.find((o: { action: string }) => o.action.startsWith('MATCH_INCOME:cash'));
         if (cash) chosen = cash;
       }
@@ -235,7 +317,7 @@ export default function ActionBar() {
       else if (act === 'OK') dispatch({ type: 'CHOOSE_ACTION', action: 'OK' });
       else dispatch({ type: 'CHOOSE_ACTION', action: act, cellId: pendingAction?.cellId });
       setBotPicked(null);
-    }, 2000);
+    }, 1600);
 
     // 超时兜底：5s 后如果还没动作，强制选最后一个
     const safetyTimer = setTimeout(() => {
