@@ -203,6 +203,21 @@ export default function ActionBar() {
           else if (p.debt > 0) { if (leave) pick = [leave]; }
           else if (p.cash < 5 && p.savings > 5 && withdrawBig) pick = [withdrawBig];
           else if (p.cash < 5) { if (leave) pick = [leave]; }
+          // 现金在所有玩家中最高且无负债 → 优先存款（每一次实时计算）
+          else if (p.debt <= 0) {
+            const isCashLeader = players.every(other => other.id === p.id || other.isBankrupt || other.cash <= p.cash);
+            if (isCashLeader && p.cash > 0) {
+              const depositOpts = pick.filter((o: { action: string }) => o.action.startsWith('DEPOSIT:') && !o.disabled);
+              if (depositOpts.length > 0) {
+                const maxDeposit = depositOpts.reduce((a, b) => {
+                  const amtA = parseFloat(a.action.split(':')[1]);
+                  const amtB = parseFloat(b.action.split(':')[1]);
+                  return amtA >= amtB ? a : b;
+                });
+                pick = [maxDeposit];
+              }
+            }
+          }
           }
         }
       }
@@ -299,7 +314,7 @@ export default function ActionBar() {
     if (p && pendingAction?.type === 'visit_or_challenge' && pendingAction.options.some((o: { action: string }) => o.action.startsWith('MATCH_INCOME:repay'))) {
       const repay = pick.find((o: { action: string }) => o.action.startsWith('MATCH_INCOME:repay'));
       if (repay && p.debt > 0) chosen = repay;
-      else if (p.cash < 10 || p.savings > 80) {
+      else if (p.cash < 20 || p.savings > 80) {
         const cash = pick.find((o: { action: string }) => o.action.startsWith('MATCH_INCOME:cash'));
         if (cash) chosen = cash;
       }
